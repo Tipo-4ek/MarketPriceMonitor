@@ -1,0 +1,73 @@
+version: '3.8'
+
+# ⚠️ ВАЖНО: При запуске в Docker антибот системы маркетплейсов могут блокировать запросы,
+# так как они определяют, что запросы идут из Docker контейнера.
+# Для работы в продакшене рекомендуется запускать бота на хосте или использовать VPS без Docker.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: market_price_monitor_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: price_tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build: .
+    container_name: market_price_monitor_bot
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./bot:/app/bot
+      - ./migrations:/app/migrations
+      - ./proxies.txt:/app/proxies.txt:ro
+
+  tests:
+    build: .
+    container_name: market_price_monitor_tests
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/price_tracker_test
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["pytest", "-v", "tests/"]
+    profiles:
+      - test
+    volumes:
+      - ./bot:/app/bot
+      - ./tests:/app/tests
+      - ./migrations:/app/migrations
+      - ./proxies.txt:/app/proxies.txt:ro
+
+  test_ozon:
+    build: .
+    container_name: market_price_monitor_test_ozon
+    env_file:
+      - .env
+    command: ["python", "test_ozon_with_proxy.py"]
+    profiles:
+      - test_ozon
+    volumes:
+      - ./bot:/app/bot
+      - ./test_ozon_with_proxy.py:/app/test_ozon_with_proxy.py
+      - ./proxies.txt:/app/proxies.txt:ro
+
+volumes:
+  postgres_data:
+

@@ -1,0 +1,26 @@
+"""User model."""
+from datetime import datetime
+
+from sqlalchemy import BigInteger, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from bot.models.base import Base
+
+
+class User(Base):
+    """Telegram user."""
+
+    __tablename__ = 'users'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    locale: Mapped[str] = mapped_column(String(10), default='ru', nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    trackings: Mapped[list['Tracking']] = relationship('Tracking', back_populates='user', cascade='all, delete-orphan')
+
+    def __repr__(self) -> str:
+        return f'<User(id={self.id}, tg_user_id={self.tg_user_id}, locale={self.locale})>'
+
+
