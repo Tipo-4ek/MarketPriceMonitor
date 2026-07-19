@@ -1,52 +1,42 @@
-"""Application configuration using hardcoded settings."""
-import sys
-import os
-
-# Add project root to path to import bot_config
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bot_config
+"""Application configuration loaded from the environment (and an optional .env)."""
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings:
-    """Application settings using hardcoded configuration."""
+class Settings(BaseSettings):
+    """Runtime settings. Field names map to upper-case environment variables."""
 
-    def __init__(self):
-        # Bot Configuration
-        self.bot_token = bot_config.BOT_TOKEN
+    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
-        # Database Configuration
-        self.database_url = bot_config.DATABASE_URL
+    # Telegram
+    bot_token: str = ''
+    admin_tg_ids: str = ''
 
-        # Bot Settings
-        self.default_locale = bot_config.DEFAULT_LOCALE
-        self.default_threshold_delta = bot_config.DEFAULT_THRESHOLD_DELTA
-        self.poll_interval_seconds = bot_config.POLL_INTERVAL_SECONDS
-        self.log_level = bot_config.LOG_LEVEL
+    # Database (async SQLAlchemy URL)
+    database_url: str = 'postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker'
 
-        # Admin Configuration
-        self.admin_tg_ids = bot_config.ADMIN_TG_IDS
+    # Behaviour
+    default_locale: str = 'ru'
+    default_threshold_delta: int = 5
+    poll_interval_seconds: int = 900
+    log_level: str = 'INFO'
 
-        # Alert Settings
-        self.alert_cooldown_hours = bot_config.ALERT_COOLDOWN_HOURS
-        self.provider_error_window_seconds = bot_config.PROVIDER_ERROR_WINDOW_SECONDS
-        self.provider_error_threshold = bot_config.PROVIDER_ERROR_THRESHOLD
+    # Provider health / alerts
+    alert_cooldown_hours: int = 24
+    provider_error_window_seconds: int = 300
+    provider_error_threshold: int = 5
 
-        # Anti-bot Configuration
-        self.proxy_url = bot_config.PROXY_URL
-        self.proxy_file = bot_config.PROXY_FILE
-        self.headless_enabled = bot_config.HEADLESS_ENABLED
-        
-        # Test mode
-        self.test_mode = bot_config.TEST_MODE
+    # Scraping
+    headless_enabled: bool = True
+    proxy_file: str = ''
+    proxy_url: str = ''
+    test_mode: bool = False
 
     @property
     def admin_ids(self) -> list[int]:
-        """Parse admin IDs from comma-separated string."""
+        """Parse admin IDs from the comma-separated ADMIN_TG_IDS string."""
         if not self.admin_tg_ids:
             return []
-        return [int(id_.strip()) for id_ in self.admin_tg_ids.split(',') if id_.strip()]
+        return [int(part.strip()) for part in self.admin_tg_ids.split(',') if part.strip()]
 
 
-# Global settings instance
 settings = Settings()
-

@@ -52,9 +52,6 @@ RUN playwright install --with-deps chromium
 # Copy application code
 COPY . .
 
-# Use Docker-specific configuration
-RUN cp bot_config_docker.py bot_config.py
-
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
 set -e\n\
