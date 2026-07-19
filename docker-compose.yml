@@ -55,19 +55,6 @@ services:
       - ./migrations:/app/migrations
       - ./proxies.txt:/app/proxies.txt:ro
 
-  test_ozon:
-    build: .
-    container_name: market_price_monitor_test_ozon
-    env_file:
-      - .env
-    command: ["python", "test_ozon_with_proxy.py"]
-    profiles:
-      - test_ozon
-    volumes:
-      - ./bot:/app/bot
-      - ./test_ozon_with_proxy.py:/app/test_ozon_with_proxy.py
-      - ./proxies.txt:/app/proxies.txt:ro
-
 volumes:
   postgres_data:
 
