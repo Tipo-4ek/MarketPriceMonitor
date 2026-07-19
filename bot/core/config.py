@@ -1,4 +1,5 @@
 """Application configuration loaded from the environment (and an optional .env)."""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

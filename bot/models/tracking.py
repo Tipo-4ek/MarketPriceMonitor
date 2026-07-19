@@ -1,10 +1,16 @@
 """Tracking model."""
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base
+
+if TYPE_CHECKING:
+    from bot.models.product import Product
+    from bot.models.user import User
 
 
 class Tracking(Base):
@@ -24,5 +30,3 @@ class Tracking(Base):
 
     def __repr__(self) -> str:
         return f'<Tracking(id={self.id}, user_id={self.user_id}, product_id={self.product_id})>'
-
-

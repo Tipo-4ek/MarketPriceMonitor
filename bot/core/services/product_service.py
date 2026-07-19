@@ -1,4 +1,5 @@
 """Product service for managing products."""
+
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -68,5 +69,3 @@ class ProductService:
         """Get product by URL and provider."""
         result = await session.execute(select(Product).where(Product.url == url, Product.provider == provider))
         return result.scalar_one_or_none()
-
-

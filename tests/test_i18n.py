@@ -1,4 +1,5 @@
 """Tests for internationalization."""
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,5 +46,3 @@ async def test_update_user_locale(db_session: AsyncSession, sample_user: User):
     await db_session.refresh(sample_user)
 
     assert sample_user.locale == 'en'
-
-

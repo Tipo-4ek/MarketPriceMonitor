@@ -1,4 +1,5 @@
 """Provider health monitoring."""
+
 from collections import deque
 from datetime import datetime, timedelta
 
@@ -69,5 +70,3 @@ class HealthMonitor:
 
 # Global health monitor instance
 health_monitor = HealthMonitor()
-
-

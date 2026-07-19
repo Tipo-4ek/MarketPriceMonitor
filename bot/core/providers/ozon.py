@@ -8,6 +8,7 @@ evolve; this provider reflects a workable approach and exposes a
 ``headless`` toggle because a headed browser on a residential host is far
 less likely to be challenged than a headless one in a datacenter.
 """
+
 import asyncio
 import json
 import random

@@ -1,4 +1,5 @@
 """Tracking service for managing user-product tracking."""
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,7 +87,9 @@ class TrackingService:
         if tracking:
             tracking.custom_threshold_delta = threshold
             await session.flush()
-            logger.info(f'Updated threshold for tracking: user={user.tg_user_id}, product={product_id}, threshold={threshold}')
+            logger.info(
+                f'Updated threshold for tracking: user={user.tg_user_id}, product={product_id}, threshold={threshold}'
+            )
 
         return tracking
 
@@ -96,5 +99,3 @@ class TrackingService:
         user.locale = locale
         await session.flush()
         logger.info(f'Updated locale for user {user.tg_user_id}: {locale}')
-
-

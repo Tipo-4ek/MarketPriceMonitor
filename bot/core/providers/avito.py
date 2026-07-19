@@ -1,5 +1,6 @@
 """Avito provider placeholder."""
-from bot.core.providers.base import Provider, ProductData
+
+from bot.core.providers.base import ProductData, Provider
 from bot.models.enums import ProviderEnum
 
 
@@ -18,5 +19,3 @@ class AvitoProvider(Provider):
 
     async def fetch_product(self, url: str) -> ProductData:
         raise NotImplementedError('Avito provider not implemented yet')
-
-

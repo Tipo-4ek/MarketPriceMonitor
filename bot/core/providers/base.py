@@ -1,4 +1,5 @@
 """Base provider interface."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
@@ -39,5 +40,3 @@ class Provider(ABC):
     async def fetch_product(self, url: str) -> ProductData:
         """Fetch product data from the marketplace."""
         pass
-
-

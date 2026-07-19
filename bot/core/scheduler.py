@@ -1,4 +1,5 @@
 """Background scheduler for price polling."""
+
 import asyncio
 from datetime import datetime
 from decimal import Decimal
@@ -86,9 +87,7 @@ class PriceScheduler:
             price_delta_percent = abs((new_price - old_price) / old_price * 100)
 
             # Get all trackings for this product
-            result = await session.execute(
-                select(Tracking, User).join(User).where(Tracking.product_id == product.id)
-            )
+            result = await session.execute(select(Tracking, User).join(User).where(Tracking.product_id == product.id))
             trackings_with_users = result.all()
 
             # Check if any user should be notified
@@ -170,4 +169,3 @@ class PriceScheduler:
                 logger.error(f'Error sending alert to admin {admin_id}: {e}')
 
         alert_manager.record_alert(provider_enum, status)
-

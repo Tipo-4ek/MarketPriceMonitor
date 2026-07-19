@@ -1,10 +1,15 @@
 """User model."""
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base
+
+if TYPE_CHECKING:
+    from bot.models.tracking import Tracking
 
 
 class User(Base):
@@ -22,5 +27,3 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f'<User(id={self.id}, tg_user_id={self.tg_user_id}, locale={self.locale})>'
-
-

@@ -3,6 +3,7 @@
 Tests run against an in-memory SQLite database by default, so they need no
 running Postgres. Override TEST_DATABASE_URL to point at another engine.
 """
+
 import os
 
 import pytest_asyncio

@@ -8,5 +8,3 @@ def normalize_locale(locale: str | None) -> str:
     if locale and locale.lower() in SUPPORTED_LOCALES:
         return locale.lower()
     return 'ru'
-
-

@@ -1,4 +1,5 @@
 """Tests for the Ozon provider: URL handling and HTML parsing (no network)."""
+
 from decimal import Decimal
 
 import pytest

@@ -1,4 +1,5 @@
 """Alert management with deduplication and cooldown."""
+
 from datetime import datetime, timedelta
 
 from bot.core.config import settings
@@ -53,5 +54,3 @@ class AlertManager:
 
 # Global alert manager instance
 alert_manager = AlertManager()
-
-

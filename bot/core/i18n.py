@@ -1,4 +1,5 @@
 """Internationalization support."""
+
 from typing import Any
 
 # Translations dictionary
@@ -110,5 +111,3 @@ class I18n:
     def get(self, locale: str | None, key: str, **kwargs: Any) -> str:
         """Get localized text."""
         return get_text(locale or self.default_locale, key, **kwargs)
-
-

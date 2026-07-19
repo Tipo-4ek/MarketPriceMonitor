@@ -1,10 +1,11 @@
 """Initial migration
 
 Revision ID: 001
-Revises: 
+Revises:
 Create Date: 2024-01-01 00:00:00.000000
 
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -90,5 +91,3 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_tg_user_id'), table_name='users')
     op.drop_table('users')
     op.execute('DROP TYPE providerenum')
-
-

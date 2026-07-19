@@ -1,4 +1,5 @@
 """Handlers package."""
+
 from aiogram import Dispatcher
 
 from bot.core.middlewares.admin_acl import AdminACL
@@ -15,5 +16,3 @@ def setup_handlers(dp: Dispatcher) -> None:
     dp.include_router(tracking.router)
     dp.include_router(monitor.router)
     dp.include_router(admin.router)
-
-

@@ -1,8 +1,8 @@
 """Tests for add, list, remove functionality."""
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.core.services.product_service import ProductService
 from bot.core.services.tracking_service import TrackingService
 from bot.models import Product, User
 
@@ -74,5 +74,3 @@ async def test_remove_nonexistent_tracking(db_session: AsyncSession, sample_user
     """Test removing non-existent tracking."""
     removed = await TrackingService.remove_tracking(db_session, sample_user, 9999)
     assert removed is False
-
-

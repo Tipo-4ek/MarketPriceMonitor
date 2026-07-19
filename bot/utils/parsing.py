@@ -1,4 +1,5 @@
 """URL parsing utilities."""
+
 import re
 from urllib.parse import urlparse
 
@@ -27,5 +28,3 @@ def is_valid_url(url: str) -> bool:
         return all([result.scheme, result.netloc])
     except Exception:
         return False
-
-

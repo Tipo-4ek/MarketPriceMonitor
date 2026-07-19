@@ -1,4 +1,5 @@
 """Provider registry and initialization."""
+
 from bot.core.providers.avito import AvitoProvider
 from bot.core.providers.base import Provider
 from bot.core.providers.ozon import OzonProvider
@@ -32,4 +33,3 @@ class ProviderRegistry:
 
 # Global provider registry
 provider_registry = ProviderRegistry()
-

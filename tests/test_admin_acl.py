@@ -1,4 +1,5 @@
 """Tests for admin access control."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,5 +65,3 @@ async def test_admin_acl_no_user():
     assert 'is_admin' in data
     assert data['is_admin'] is False
     handler.assert_called_once()
-
-

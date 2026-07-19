@@ -1,4 +1,5 @@
 """Bot startup script."""
+
 import asyncio
 
 from aiogram import Bot, Dispatcher
@@ -52,5 +53,3 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info('Bot stopped by user')
-
-

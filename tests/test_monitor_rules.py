@@ -1,4 +1,5 @@
 """Tests for monitor rules (thresholds)."""
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +15,7 @@ async def test_custom_threshold(db_session: AsyncSession, sample_user: User, sam
     await db_session.commit()
 
     # Set custom threshold
-    updated_tracking = await TrackingService.update_tracking_threshold(
-        db_session, sample_user, sample_product.id, 10
-    )
+    updated_tracking = await TrackingService.update_tracking_threshold(db_session, sample_user, sample_product.id, 10)
     await db_session.commit()
 
     assert updated_tracking is not None
@@ -38,5 +37,3 @@ async def test_add_tracking_with_custom_threshold(db_session: AsyncSession, samp
 
     assert created is True
     assert tracking.custom_threshold_delta == 15
-
-

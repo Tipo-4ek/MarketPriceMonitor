@@ -1,4 +1,5 @@
 """Common handlers (start, help, lang)."""
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -61,4 +62,3 @@ async def cmd_lang(message: Message):
         text = get_text(locale, 'language_changed')
         await message.answer(text)
         logger.info(f'User {message.from_user.id} changed locale to {locale}')
-

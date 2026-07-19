@@ -1,4 +1,5 @@
 """Monitor handlers (threshold configuration)."""
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -71,4 +72,3 @@ async def cmd_monitor(message: Message):
 
         else:
             await message.answer('Usage: /monitor default <delta> OR /monitor set <id> <delta>')
-

@@ -1,4 +1,5 @@
 """Admin access control middleware."""
+
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
@@ -25,5 +26,3 @@ class AdminACL(BaseMiddleware):
             data['is_admin'] = False
 
         return await handler(event, data)
-
-

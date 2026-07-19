@@ -34,5 +34,3 @@ def validate_product_id(product_id_str: str) -> int | None:
 def validate_locale(locale: str) -> bool:
     """Validate locale code."""
     return locale in ('ru', 'en')
-
-

@@ -1,12 +1,18 @@
 """Product model."""
+
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base
 from bot.models.enums import ProviderEnum
+
+if TYPE_CHECKING:
+    from bot.models.price_history import PriceHistory
+    from bot.models.tracking import Tracking
 
 
 class Product(Base):
@@ -25,12 +31,12 @@ class Product(Base):
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    trackings: Mapped[list['Tracking']] = relationship('Tracking', back_populates='product', cascade='all, delete-orphan')
+    trackings: Mapped[list['Tracking']] = relationship(
+        'Tracking', back_populates='product', cascade='all, delete-orphan'
+    )
     price_history: Mapped[list['PriceHistory']] = relationship(
         'PriceHistory', back_populates='product', cascade='all, delete-orphan'
     )
 
     def __repr__(self) -> str:
         return f'<Product(id={self.id}, provider={self.provider.value}, title={self.title[:30]})>'
-
-

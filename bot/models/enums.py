@@ -1,4 +1,5 @@
 """Database enums."""
+
 import enum
 
 
@@ -17,5 +18,3 @@ class ProviderStatus(str, enum.Enum):
     OK = 'ok'
     DEGRADED = 'degraded'
     DOWN = 'down'
-
-

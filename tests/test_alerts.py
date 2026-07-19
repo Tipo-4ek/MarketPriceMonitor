@@ -1,7 +1,6 @@
 """Tests for alert system."""
-from datetime import datetime, timedelta
 
-import pytest
+from datetime import datetime, timedelta
 
 from bot.core.alerts import AlertManager
 from bot.models.enums import ProviderEnum, ProviderStatus
@@ -77,5 +76,3 @@ def test_alert_cooldown_expired():
 
     # Alert should be sent (cooldown expired)
     assert alert_manager.should_send_alert(provider, status) is True
-
-

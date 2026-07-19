@@ -1,4 +1,5 @@
 """Admin handlers."""
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -71,5 +72,3 @@ async def cmd_health_reset(message: Message, is_admin: bool = False):
     text = get_text('ru', 'health_reset')
     await message.answer(text)
     logger.info(f'Admin {message.from_user.id} reset health status')
-
-
