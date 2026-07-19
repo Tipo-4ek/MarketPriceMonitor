@@ -3,6 +3,10 @@ import random
 from pathlib import Path
 from typing import Dict
 
+from bot.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class ProxyProvider:
     """Provider for proxy rotation with pool management."""
@@ -72,10 +76,11 @@ class ProxyProvider:
                     'username': None,
                     'password': None,
                 }
-        except Exception as e:
-            print(f'Failed to parse proxy "{proxy_str}": {e}')
+        except Exception:
+            # Do not log the raw proxy string — it may contain credentials.
+            logger.warning('Failed to parse a proxy entry; skipping it')
             return None
-        
+
         return None
 
     def _load_proxy_pool(self, proxy_file: str):
@@ -83,25 +88,25 @@ class ProxyProvider:
         try:
             proxy_path = Path(proxy_file)
             if not proxy_path.exists():
-                print(f'Proxy file not found: {proxy_file}')
+                logger.warning('Proxy file not found: %s', proxy_file)
                 return
-            
+
             with open(proxy_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
+
             for line in lines:
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                
+
                 parsed = self._parse_proxy(line)
                 if parsed:
                     self.proxy_pool.append(parsed)
-            
-            print(f'Loaded {len(self.proxy_pool)} proxies from {proxy_file}')
-            
+
+            logger.info('Loaded %d proxies from %s', len(self.proxy_pool), proxy_file)
+
         except Exception as e:
-            print(f'Error loading proxy file: {e}')
+            logger.warning('Error loading proxy file: %s', e)
 
     def get_proxy(self) -> Dict[str, str] | None:
         """

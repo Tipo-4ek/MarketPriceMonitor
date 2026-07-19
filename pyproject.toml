@@ -32,7 +32,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "Q", "E1", "E2", "E3", "T20"]
-ignore = []
+# The formatter owns line width; E501 on long string literals (user-agents,
+# i18n messages) is noise it can't fix, so we don't lint it.
+ignore = ["E501"]
 
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = "single"

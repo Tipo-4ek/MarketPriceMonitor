@@ -1,6 +1,6 @@
 """Background scheduler for price polling."""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from aiogram import Bot
