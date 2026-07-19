@@ -131,27 +131,7 @@ class PriceScheduler:
                 change=f'{change_percent:.1f}',
                 url=product.url,
             )
-            
-            # Send message first
             await self.bot.send_message(user.tg_user_id, message, parse_mode='HTML', disable_web_page_preview=True)
-            
-            # Try to send screenshot if available
-            try:
-                # Get the latest product data to check for screenshot
-                provider = self.provider_registry.get_provider(product.provider)
-                if provider:
-                    product_data = await provider.fetch_product(product.url)
-                    if hasattr(product_data, 'screenshot_path') and product_data.screenshot_path:
-                        with open(product_data.screenshot_path, 'rb') as photo:
-                            await self.bot.send_photo(
-                                user.tg_user_id, 
-                                photo, 
-                                caption=f"📸 Скриншот страницы товара\n{product.title}"
-                            )
-                        logger.info(f'Sent screenshot to user {user.tg_user_id} for product {product.id}')
-            except Exception as e:
-                logger.debug(f'Could not send screenshot to user {user.tg_user_id}: {e}')
-            
             logger.info(f'Notified user {user.tg_user_id} about price change for product {product.id}')
         except Exception as e:
             logger.error(f'Error notifying user {user.tg_user_id}: {e}')

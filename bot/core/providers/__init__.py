@@ -1,7 +1,7 @@
 """Provider registry and initialization."""
 from bot.core.providers.avito import AvitoProvider
 from bot.core.providers.base import Provider
-from bot.core.providers.ozon_enhanced import OzonEnhancedProvider  # Enhanced provider with multiple strategies
+from bot.core.providers.ozon import OzonProvider
 from bot.core.providers.wildberries import WildberriesProvider
 from bot.core.providers.yandex_market import YandexMarketProvider
 from bot.models.enums import ProviderEnum
@@ -12,7 +12,7 @@ class ProviderRegistry:
 
     def __init__(self):
         self.providers: dict[ProviderEnum, Provider] = {
-            ProviderEnum.OZON: OzonEnhancedProvider(),  # Enhanced provider with multiple strategies
+            ProviderEnum.OZON: OzonProvider(),
             ProviderEnum.AVITO: AvitoProvider(),
             ProviderEnum.WILDBERRIES: WildberriesProvider(),
             ProviderEnum.YANDEX_MARKET: YandexMarketProvider(),

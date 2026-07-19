@@ -14,9 +14,6 @@ class ProductData:
     price: Decimal
     currency: str
     url: str
-    screenshot_path: str = None  # Path to screenshot of the product page
-    raw_html: str = None  # Raw HTML content for debugging
-    debug_info: dict = None  # Additional debug information
 
 
 class Provider(ABC):
