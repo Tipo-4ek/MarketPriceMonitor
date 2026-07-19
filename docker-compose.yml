@@ -1,23 +1,23 @@
-version: '3.8'
-
-# ⚠️ ВАЖНО: При запуске в Docker антибот системы маркетплейсов могут блокировать запросы,
-# так как они определяют, что запросы идут из Docker контейнера.
-# Для работы в продакшене рекомендуется запускать бота на хосте или использовать VPS без Docker.
+# Note: marketplace anti-bot systems often flag requests coming from datacenter
+# IPs / containers. For real tracking, run the bot on a residential/desktop host
+# (see README). Docker is fine for development, tests, and trying the project.
 
 services:
   db:
     image: postgres:16-alpine
     container_name: market_price_monitor_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: price_tracker
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-price_tracker}
+    # No host port mapping: the DB is only reached by the bot over the compose
+    # network. Uncomment to expose it for local inspection.
+    # ports:
+    #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -27,6 +27,8 @@ services:
     container_name: market_price_monitor_bot
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-price_tracker}
     depends_on:
       db:
         condition: service_healthy
@@ -34,27 +36,18 @@ services:
     volumes:
       - ./bot:/app/bot
       - ./migrations:/app/migrations
-      - ./proxies.txt:/app/proxies.txt:ro
 
   tests:
     build: .
     container_name: market_price_monitor_tests
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/price_tracker_test
-    depends_on:
-      db:
-        condition: service_healthy
+    # Tests use an in-memory SQLite DB, so no database service is needed.
+    entrypoint: []
     command: ["pytest", "-v", "tests/"]
     profiles:
       - test
     volumes:
       - ./bot:/app/bot
       - ./tests:/app/tests
-      - ./migrations:/app/migrations
-      - ./proxies.txt:/app/proxies.txt:ro
 
 volumes:
   postgres_data:
-

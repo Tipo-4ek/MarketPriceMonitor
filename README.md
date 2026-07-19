@@ -1,353 +1,132 @@
-# 🛒 MarketPriceMonitor
+# MarketPriceMonitor
 
-Telegram бот для отслеживания цен на товары с различных маркетплейсов.
+A Telegram bot that tracks product prices on marketplaces: send it a product
+link, it polls the price on a schedule and messages you when the price moves
+past your threshold.
 
-## 🚀 Возможности
+![CI](https://github.com/Tipo-4ek/MarketPriceMonitor/actions/workflows/ci.yml/badge.svg)
 
-- **Отслеживание цен**: Мониторинг цен на товары и уведомления об изменениях
-- **Множественные провайдеры**: Поддержка различных маркетплейсов (в настоящее время реализован только один провайдер)
-- **Настраиваемые пороги**: Установка глобальных или индивидуальных порогов изменения цены
-- **Мультиязычность**: Поддержка русского и английского языков
-- **Административные инструменты**: Мониторинг здоровья провайдеров и алерты
-- **Фоновый опрос**: Автоматическая проверка цен с настраиваемым интервалом
+The point of this repository is the **architecture** — a pluggable provider
+model behind a health-checked async scheduler — not a maintained scraper for
+any one marketplace. One example provider (Ozon) is included to exercise the
+design end to end.
 
-## 🏗 Технологический стек
+> **Status:** reference implementation. Marketplace anti-bot measures change
+> over time; the example provider reflects a workable approach and is not
+> guaranteed to keep parsing any given site.
 
-- **Python 3.12+**
-- **aiogram 3** - Telegram Bot framework (polling mode)
-- **SQLAlchemy 2** - ORM с async поддержкой
-- **PostgreSQL** - База данных
-- **Alembic** - Миграции базы данных
-- **Poetry** - Управление зависимостями
-- **Docker & Docker Compose** - Контейнеризация (⚠️ см. предупреждение ниже)
-- **Ruff** - Линтинг и форматирование
-- **pytest** - Тестирование
+**Stack:** Python 3.12 · aiogram 3 · SQLAlchemy 2 (async) · PostgreSQL · Alembic
+· Playwright · Poetry · pytest · ruff
 
-## ⚠️ ВАЖНО: Docker и антибот системы
+## Architecture
 
-**При запуске в Docker антибот системы маркетплейсов могут блокировать запросы**, так как они определяют, что запросы идут из Docker контейнера. Для работы в продакшене рекомендуется запускать бота на хосте или использовать VPS без Docker.
+- **Provider abstraction + URL-dispatch registry.** Adding a marketplace means
+  implementing one interface (`supports` / `normalize` / `fetch_product` in
+  [`bot/core/providers/base.py`](bot/core/providers/base.py)) and registering
+  it. The registry routes an incoming URL to the provider that claims it.
+- **Health-checked async polling scheduler.**
+  [`scheduler.py`](bot/core/scheduler.py) polls every tracked product on an
+  interval. A sliding error window per provider
+  ([`health.py`](bot/core/providers/health.py)) drives an OK → DEGRADED → DOWN
+  state machine, and admins get de-duplicated, cooldown-gated alerts
+  ([`alerts.py`](bot/core/alerts.py)) on status transitions.
+- **Typed SQLAlchemy 2 models + Alembic.** `Mapped[...]` models with cascades
+  and constraints ([`bot/models/`](bot/models/)) and a hand-written initial
+  migration ([`migrations/versions/001_initial.py`](migrations/versions/001_initial.py)).
+- **i18n (ru/en) with fallback** ([`i18n.py`](bot/core/i18n.py)) and an
+  **admin ACL middleware** ([`admin_acl.py`](bot/core/middlewares/admin_acl.py)).
+- **Config from the environment** via pydantic-settings
+  ([`config.py`](bot/core/config.py)) — see [`.env.example`](.env.example).
 
-Docker подходит для:
-- Разработки и тестирования
-- Локального запуска для личного использования
-- Ознакомления с проектом
+## Project layout
 
-Docker НЕ рекомендуется для:
-- Продакшена с большим количеством запросов
-- Работы с маркетплейсами, которые активно блокируют ботов
-
-## 📋 Требования
-
-- Python 3.12+
-- PostgreSQL (для Docker) или SQLite (для локального запуска)
-- Telegram Bot Token (от [@BotFather](https://t.me/botfather))
-
-## 🔧 Установка
-
-### Локальный запуск (рекомендуется для продакшена)
-
-1. **Клонировать репозиторий**
-```bash
-git clone https://github.com/Tipo-4ek/MarketPriceMonitor.git
-cd MarketPriceMonitor
+```text
+bot/
+  core/
+    config.py          # pydantic-settings, reads env / .env
+    logging.py         # structured logging
+    i18n.py            # ru/en translations with fallback
+    scheduler.py       # background price-polling loop
+    alerts.py          # alert cooldown + dedup
+    startup.py         # entry point
+    middlewares/       # admin ACL
+    providers/
+      base.py          # Provider interface + ProductData
+      __init__.py      # registry / URL dispatch
+      ozon.py          # example provider (Playwright)
+      health.py        # provider health state machine
+      anti_bot/        # proxy pool + user-agent rotation
+    services/          # product / tracking business logic
+  handlers/            # bot command handlers
+  models/              # SQLAlchemy models
+  utils/               # parsing / validation helpers
+migrations/            # Alembic
+tests/                 # pytest (in-memory sqlite)
 ```
 
-2. **Установить зависимости**
+## Configuration
+
+Copy `.env.example` to `.env` and fill it in. Settings are read from the
+environment (upper-case names map to the fields in `config.py`).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BOT_TOKEN` | – | Telegram bot token from [@BotFather](https://t.me/botfather) (required) |
+| `ADMIN_TG_IDS` | – | Comma-separated admin Telegram user IDs |
+| `DATABASE_URL` | `postgresql+asyncpg://…` | Async SQLAlchemy URL (Postgres or `sqlite+aiosqlite://…`) |
+| `DEFAULT_LOCALE` | `ru` | Default language |
+| `DEFAULT_THRESHOLD_DELTA` | `5` | Default price-change threshold (%) |
+| `POLL_INTERVAL_SECONDS` | `900` | Polling interval |
+| `LOG_LEVEL` | `INFO` | Logging level |
+| `HEADLESS_ENABLED` | `true` | Run the scraping browser headless (see note below) |
+| `PROXY_FILE` / `PROXY_URL` | – | Optional proxy pool / single proxy |
+
+## Running
+
+### Locally (recommended for real tracking)
+
 ```bash
 poetry install
-```
-
-3. **Настроить переменные окружения**
-
-Создайте файл `.env`:
-```env
-BOT_TOKEN=your_bot_token_here
-ADMIN_TG_IDS=your_telegram_user_id
-DATABASE_URL=sqlite+aiosqlite:///./price_tracker.db
-DEFAULT_LOCALE=ru
-POLL_INTERVAL_SECONDS=900
-LOG_LEVEL=INFO
-```
-
-4. **Применить миграции**
-```bash
+poetry run playwright install chromium
+cp .env.example .env         # then edit BOT_TOKEN, ADMIN_TG_IDS, DATABASE_URL
 poetry run alembic upgrade head
-```
-
-5. **Запустить бота**
-```bash
 poetry run python -m bot.core.startup
 ```
 
-### Запуск через Docker (для разработки/тестирования)
+### With Docker (development / trying it out)
 
-⚠️ **Внимание**: При запуске в Docker антибот системы могут блокировать запросы!
-
-1. **Клонировать репозиторий**
 ```bash
-git clone https://github.com/Tipo-4ek/MarketPriceMonitor.git
-cd MarketPriceMonitor
-```
-
-2. **Создать файл `.env`**
-```env
-BOT_TOKEN=your_bot_token_here
-ADMIN_TG_IDS=your_telegram_user_id
-```
-
-3. **Запустить через Docker Compose**
-```bash
+cp .env.example .env         # set BOT_TOKEN, ADMIN_TG_IDS
 docker compose up --build
 ```
 
-Бот автоматически:
-- Запустит PostgreSQL базу данных
-- Применит миграции Alembic
-- Запустит Telegram бота в режиме polling
-- Начнет фоновую проверку цен
+The bot container waits for Postgres, applies migrations, and starts polling.
+See the note in `docker-compose.yml`: containers/datacenter IPs are easier for
+marketplaces to flag, so a residential/desktop host is better for real use.
 
-## 📱 Команды бота
+## Tests
 
-### Команды пользователя
-- `/start` - Приветственное сообщение
-- `/help` - Показать доступные команды
-- `/add <url>` - Добавить товар для отслеживания
-- `/list` - Показать отслеживаемые товары
-- `/remove <id>` - Удалить товар из отслеживания
-- `/monitor default <delta>` - Установить порог изменения цены по умолчанию (%)
-- `/monitor set <id> <delta>` - Установить индивидуальный порог для товара
-- `/lang <ru|en>` - Изменить язык
-
-**Подсказка**: Вы можете просто отправить URL товара без команды `/add`!
-
-### Команды администратора
-- `/provider_status` - Показать статус здоровья провайдеров
-- `/alerts_on` - Включить уведомления об ошибках провайдеров
-- `/alerts_off` - Отключить уведомления об ошибках провайдеров
-- `/health_reset` - Сбросить статус здоровья провайдеров
-
-## 🌐 Поддерживаемые провайдеры
-
-| Провайдер | Статус | URL Pattern | Примечания |
-|-----------|--------|-------------|------------|
-| **o222one** | ✅ Реализован | `o222one.ru` | Использует JSON API + undetected-chromedriver |
-| **Av1t0** | 🔜 Планируется | `av1t0.ru` | - |
-| **Wii1lddberizzzz** | 🔜 Планируется | `wii1lddberizzzz.ru`, `wb.ru` | - |
-| **Yandex.Market** | 🔜 Планируется | `market.yandex.ru` | - |
-
-### Текущий статус
-
-**В настоящее время реализован только провайдер для o222one** (обфусцированное название для предотвращения автоматического обнаружения).
-
-## ⚙️ Конфигурация
-
-Основные переменные окружения:
-
-| Переменная | По умолчанию | Описание |
-|------------|--------------|----------|
-| `BOT_TOKEN` | - | Telegram bot token (обязательно) |
-| `DATABASE_URL` | - | URL подключения к базе данных |
-| `DEFAULT_LOCALE` | `ru` | Язык по умолчанию |
-| `DEFAULT_THRESHOLD_DELTA` | `5` | Порог изменения цены по умолчанию (%) |
-| `POLL_INTERVAL_SECONDS` | `900` | Интервал проверки цен (15 минут) |
-| `LOG_LEVEL` | `INFO` | Уровень логирования |
-| `ADMIN_TG_IDS` | - | ID администраторов через запятую |
-| `ALERT_COOLDOWN_HOURS` | `24` | Период cooldown для алертов |
-| `PROVIDER_ERROR_THRESHOLD` | `5` | Количество ошибок до изменения статуса |
-
-## 🧪 Тестирование
-
-### Запуск тестов через Docker
-```bash
-docker compose run --rm tests
-```
-
-### Запуск тестов локально
-```bash
-poetry run pytest tests/ -v
-```
-
-### Локальное тестирование провайдера
-
-Для проверки работы провайдера на хосте (без Docker) используйте скрипт `run_provider_test_local.py`:
+Tests run against an in-memory SQLite database — no Postgres required.
 
 ```bash
-python run_provider_test_local.py
+poetry run pytest -v          # or: docker compose --profile test run --rm tests
 ```
 
-⚠️ **Важно**: Этот скрипт работает только при локальном запуске (не в Docker). При запуске в Docker антибот системы могут блокировать запросы.
+## Bot commands
 
-Скрипт:
-- Тестирует работу провайдера напрямую
-- Извлекает данные о товаре (название, цена)
-- Проверяет наличие скриншотов
-- Выводит информацию для отладки
+**Users:** `/start`, `/help`, `/add <url>`, `/list`, `/remove <id>`,
+`/monitor set <id> <delta>`, `/lang <ru|en>` (you can also just paste a URL).
 
-Этот скрипт полезен для:
-- Проверки работы провайдера на хосте
-- Отладки проблем с парсингом
-- Тестирования без использования Docker
-- Верификации корректности работы провайдера
+**Admins:** `/provider_status`, `/alerts_on`, `/alerts_off`, `/health_reset`.
 
-## 🛠 Разработка
+## A note on scraping
 
-### Установка зависимостей
-```bash
-poetry install
-```
+The example provider uses Playwright to render an Ozon product page and reads
+the price from the page's structured data. `HEADLESS_ENABLED=false` runs a
+visible browser, which a residential host can use to avoid anti-bot challenges.
+Respect each marketplace's Terms of Service and `robots.txt`, and keep polling
+intervals reasonable. This project is for personal/educational use.
 
-### Линтер
-```bash
-poetry run ruff check .
-```
+## License
 
-### Форматирование кода
-```bash
-poetry run ruff format .
-```
-
-### Создание новой миграции
-```bash
-poetry run alembic revision --autogenerate -m "Description"
-```
-
-### Применение миграций
-```bash
-poetry run alembic upgrade head
-```
-
-## 📁 Структура проекта
-
-```
-MarketPriceMonitor/
-├── bot/
-│   ├── core/
-│   │   ├── config.py          # Конфигурация
-│   │   ├── logging.py         # Настройка логирования
-│   │   ├── i18n.py            # Интернационализация
-│   │   ├── scheduler.py       # Фоновая проверка цен
-│   │   ├── alerts.py          # Управление алертами
-│   │   ├── startup.py         # Точка входа
-│   │   ├── middlewares/       # Middlewares (ACL)
-│   │   ├── providers/         # Провайдеры маркетплейсов
-│   │   │   ├── base.py        # Абстрактный провайдер
-│   │   │   ├── o222one.py     # Реализация для o222one
-│   │   │   ├── health.py      # Мониторинг здоровья
-│   │   │   └── anti_bot/      # Утилиты для обхода антибот
-│   │   └── services/          # Бизнес-логика
-│   ├── handlers/              # Обработчики команд бота
-│   ├── models/                # Модели базы данных
-│   └── utils/                 # Утилиты
-├── migrations/                # Миграции Alembic
-├── tests/                     # Unit тесты
-├── run_provider_test_local.py # Локальный тест провайдера (без Docker)
-├── docker-compose.yml         # Docker конфигурация
-├── Dockerfile                 # Образ контейнера
-├── pyproject.toml            # Зависимости Poetry
-└── .env.example              # Шаблон переменных окружения
-```
-
-## 🔒 Безопасность
-
-- Команды администратора требуют, чтобы ID пользователя был в `ADMIN_TG_IDS`
-- Уведомления о здоровье провайдеров ограничены по частоте
-- База данных использует параметризованные запросы (SQLAlchemy ORM)
-- Все токены и чувствительные данные должны храниться в переменных окружения
-
-## 🐛 Решение проблем
-
-### Бот не запускается
-- Проверьте `BOT_TOKEN` в `.env`
-- Убедитесь, что PostgreSQL запущен: `docker compose ps`
-- Проверьте логи: `docker compose logs bot`
-
-### Миграции не применяются
-- Проверьте подключение к базе данных
-- Проверьте формат DATABASE_URL
-- Попробуйте: `docker compose down -v` затем `docker compose up --build`
-
-### Обновления цен не работают
-- Проверьте настройку `POLL_INTERVAL_SECONDS`
-- Проверьте статус провайдера: `/provider_status`
-- Проверьте логи бота на наличие ошибок
-
-## 📝 История разработки
-
-### Проблемы и решения
-
-Во время разработки проекта были пройдены следующие этапы:
-
-#### Проблема: Блокировки маркетплейсов
-**Проблема**: Маркетплейсы (особенно o222one) активно блокировали запросы, даже при использовании различных методов обхода (Playwright, Selenium, undetected-chromedriver).
-
-**Решение**: 
-- Реализован провайдер с использованием undetected-chromedriver и прямого доступа к JSON API
-- Добавлена поддержка прокси с ротацией
-- Реализованы множественные стратегии обхода защиты с автоматическим переключением
-
-#### Проблема: Обнаружение Docker контейнеров
-**Проблема**: Антибот системы определяют запросы из Docker контейнеров и блокируют их.
-
-**Решение**: 
-- Добавлено предупреждение в документацию о необходимости запуска на хосте для продакшена
-- Docker оставлен только для разработки и тестирования
-
-#### Проблема: Недостаточные селекторы для парсинга
-**Проблема**: Селекторы для извлечения заголовков и цен товаров были недостаточными, что приводило к ошибкам парсинга.
-
-**Решение**: 
-- Добавлено множество селекторов (10+ вариантов для заголовков и цен)
-- Реализована очистка HTML-контента
-- Добавлены fallback-методы при неудаче основных подходов
-
-#### Проблема: Отсутствие визуальной диагностики
-**Проблема**: Пользователи не видели скриншоты страниц при добавлении товаров или ошибках.
-
-**Решение**: 
-- Добавлена автоматическая отправка скриншотов при успешном добавлении товара
-- Добавлена отправка скриншотов ошибок при неудачном парсинге
-- Улучшена обработка ошибок с более информативными сообщениями
-
-#### Проблема: Интеграция прокси
-**Проблема**: Требовалась система ротации прокси для обхода блокировок.
-
-**Решение**: 
-- Создан ProxyProvider с поддержкой пула прокси
-- Реализована автоматическая ротация прокси
-- Поддержка загрузки прокси из файла
-
-### Текущий статус
-
-- ✅ Реализован провайдер для o222one с множественными стратегиями обхода
-- ✅ Система мониторинга здоровья провайдеров
-- ✅ Автоматические уведомления об ошибках
-- ✅ Поддержка прокси с ротацией
-- ⚠️ Docker не рекомендуется для продакшена из-за блокировок антибот систем
-- 🔜 Планируется добавление провайдеров для других маркетплейсов
-
-## 🗺 Roadmap
-
-- [x] ~~Реализовать базовую функциональность отслеживания цен~~
-- [x] ~~Добавить поддержку прокси с ротацией~~
-- [x] ~~Добавить headless browser поддержку для JS-рендеренных страниц~~
-- [ ] Добавить провайдер для Av1t0
-- [ ] Добавить провайдер для Wii1lddberizzzz
-- [ ] Добавить провайдер для Yandex.Market
-- [ ] Графики истории цен
-- [ ] Экспорт отслеживаемых товаров
-- [ ] Поддержка webhook режима
-- [ ] Предсказания падения цен
-
-## 📝 Лицензия
-
-Это pet проект для образовательных целей.
-
-## 🤝 Вклад
-
-Это личный учебный проект, но предложения и обратная связь приветствуются!
-
-## 📧 Контакты
-
-По вопросам или проблемам, пожалуйста, откройте issue на GitHub.
-
----
+[MIT](LICENSE) © Ilya Lyubimov

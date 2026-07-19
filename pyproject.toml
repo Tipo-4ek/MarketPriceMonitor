@@ -1,9 +1,11 @@
 [tool.poetry]
 name = "market-price-monitor"
 version = "0.1.0"
-description = "Telegram bot for tracking prices across marketplaces"
-authors = ["Your Name <your.email@example.com>"]
+description = "Telegram price-tracking bot with a pluggable marketplace-provider architecture"
+authors = ["Ilya Lyubimov <Tipo_4ek@inbox.ru>"]
+license = "MIT"
 readme = "README.md"
+repository = "https://github.com/Tipo-4ek/MarketPriceMonitor"
 packages = [{include = "bot"}]
 
 [tool.poetry.dependencies]
