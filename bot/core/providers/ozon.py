@@ -30,7 +30,14 @@ logger = get_logger(__name__)
 _OZON_HOSTS = ('ozon.ru', 'www.ozon.ru', 'm.ozon.ru')
 
 # Signals that Ozon served a challenge / block page instead of the product.
-_BLOCK_MARKERS = ('доступ ограничен', 'access denied', 'checking your browser', 'ddos-guard')
+_BLOCK_MARKERS = (
+    'доступ ограничен',
+    'access denied',
+    'checking your browser',
+    'ddos-guard',
+    'antibot',
+    'captcha',
+)
 
 # Minimal anti-automation shim. Kept readable on purpose — no obfuscation.
 _STEALTH_INIT = """
