@@ -1,54 +1,48 @@
-"""Test configuration and fixtures."""
-import asyncio
+"""Test configuration and fixtures.
+
+Tests run against an in-memory SQLite database by default, so they need no
+running Postgres. Override TEST_DATABASE_URL to point at another engine.
+"""
 import os
 
-import pytest
 import pytest_asyncio
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from bot.models.base import Base
 
-# Test database URL
-TEST_DATABASE_URL = os.getenv(
-    'DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@db:5432/price_tracker_test'
-)
+TEST_DATABASE_URL = os.getenv('TEST_DATABASE_URL', 'sqlite+aiosqlite://')
 
 
-@pytest.fixture(scope='session')
-def event_loop():
-    """Create event loop for tests."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+def _make_engine():
+    """Create the test engine, keeping in-memory SQLite alive across connections."""
+    if TEST_DATABASE_URL.startswith('sqlite') and ':memory:' not in TEST_DATABASE_URL:
+        # 'sqlite+aiosqlite://' is an in-memory DB; share one connection so the
+        # schema created below is visible to every session in the test.
+        return create_async_engine(
+            TEST_DATABASE_URL,
+            poolclass=StaticPool,
+            connect_args={'check_same_thread': False},
+        )
+    return create_async_engine(TEST_DATABASE_URL, echo=False)
 
 
 @pytest_asyncio.fixture(scope='function')
 async def db_session():
-    """Create a test database session."""
-    # Create engine
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    """Provide a session against a freshly-created schema, torn down after."""
+    engine = _make_engine()
 
-    # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
-    # Create session
     async_session = async_sessionmaker(engine, expire_on_commit=False)
-
     session = async_session()
-
     try:
         yield session
     finally:
         await session.close()
-
-    # Cleanup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-    await engine.dispose()
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -82,5 +76,3 @@ async def sample_product(db_session: AsyncSession):
     await db_session.commit()
     await db_session.refresh(product)
     return product
-
-
