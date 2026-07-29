@@ -25,9 +25,14 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 900
     log_level: str = 'INFO'
 
-    # Provider health / alerts
+    # Provider health / alerts.
+    #
+    # The error window must span several poll intervals. A provider is polled
+    # once per interval, so a window shorter than one interval expires each
+    # cycle's errors before the next arrives and the counter can never reach the
+    # threshold — the whole health state machine silently reports OK forever.
     alert_cooldown_hours: int = 24
-    provider_error_window_seconds: int = 300
+    provider_error_window_seconds: int = 3600
     provider_error_threshold: int = 5
 
     # Browser used for scraping. The defaults are the configuration that was
@@ -65,3 +70,11 @@ def validate_runtime_settings() -> None:
     """
     if not settings.bot_token:
         raise ConfigError('BOT_TOKEN is not set — copy .env.example to .env and fill in your @BotFather token')
+
+    if settings.provider_error_window_seconds < settings.poll_interval_seconds:
+        raise ConfigError(
+            'PROVIDER_ERROR_WINDOW_SECONDS '
+            f'({settings.provider_error_window_seconds}) must be at least POLL_INTERVAL_SECONDS '
+            f"({settings.poll_interval_seconds}), otherwise every cycle's errors expire before the "
+            'next one and provider health can never leave OK'
+        )
