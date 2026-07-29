@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('tg_user_id', sa.BigInteger(), nullable=False),
         sa.Column('locale', sa.String(length=10), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )
     op.create_index(op.f('ix_users_tg_user_id'), 'users', ['tg_user_id'], unique=True)
@@ -43,8 +43,8 @@ def upgrade() -> None:
         sa.Column('title', sa.String(length=512), nullable=False),
         sa.Column('currency', sa.String(length=10), nullable=False),
         sa.Column('last_price', sa.Numeric(precision=12, scale=2), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('url', 'provider', name='uq_product_url_provider'),
     )
@@ -57,7 +57,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('product_id', sa.Integer(), nullable=False),
         sa.Column('custom_threshold_delta', sa.Integer(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['product_id'], ['products.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
@@ -71,7 +71,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('product_id', sa.Integer(), nullable=False),
         sa.Column('price', sa.Numeric(precision=12, scale=2), nullable=False),
-        sa.Column('timestamp', sa.DateTime(), nullable=False),
+        sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['product_id'], ['products.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )

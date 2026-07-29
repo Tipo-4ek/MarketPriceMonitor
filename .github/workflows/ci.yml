@@ -54,6 +54,46 @@ jobs:
       - name: Run tests
         run: poetry run pytest -q
 
+  migrations:
+    # The unit suite builds its schema from the models on SQLite, so it cannot
+    # see a migration that has drifted from them. This runs the real migrations
+    # against a real Postgres and asks Alembic whether anything differs.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: price_tracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install Poetry
+        run: pipx install poetry==2.4.1
+
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --only main
+
+      - name: Migrate and compare against the models
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker
+        run: poetry run python scripts/check_schema_drift.py
+
   docker:
     # The README documents a Docker path, so CI builds the image and runs the
     # suite inside it. A container that only builds on the author's laptop is
