@@ -3,16 +3,19 @@
 import enum
 
 
-class ProviderEnum(str, enum.Enum):
-    """Supported marketplace providers."""
+class ProviderEnum(enum.StrEnum):
+    """Marketplaces with a working provider implementation.
+
+    A member is added here only when a provider actually fetches prices for it:
+    the registry is keyed by this enum, so a speculative member would be a
+    marketplace the bot claims to support and then fails on.
+    """
 
     OZON = 'ozon'
-    AVITO = 'avito'
     WILDBERRIES = 'wildberries'
-    YANDEX_MARKET = 'yandex_market'
 
 
-class ProviderStatus(str, enum.Enum):
+class ProviderStatus(enum.StrEnum):
     """Provider health status."""
 
     OK = 'ok'

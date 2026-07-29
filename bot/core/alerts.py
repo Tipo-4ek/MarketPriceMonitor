@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+from bot.core.clock import utcnow
 from bot.core.config import settings
 from bot.core.logging import get_logger
 from bot.models.enums import ProviderEnum, ProviderStatus
@@ -28,12 +29,12 @@ class AlertManager:
             return True
 
         cooldown = timedelta(hours=settings.alert_cooldown_hours)
-        return datetime.utcnow() - last_alert_time > cooldown
+        return utcnow() - last_alert_time > cooldown
 
     def record_alert(self, provider: ProviderEnum, status: ProviderStatus) -> None:
         """Record that an alert was sent."""
         key = (provider, status)
-        self.last_alerts[key] = datetime.utcnow()
+        self.last_alerts[key] = utcnow()
         logger.info(f'Alert recorded for {provider.value} with status {status.value}')
 
     def enable_alerts(self) -> None:

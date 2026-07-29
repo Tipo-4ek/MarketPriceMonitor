@@ -4,9 +4,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, Numeric, String, UniqueConstraint
+from sqlalchemy import DateTime, Enum, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from bot.core.clock import utcnow
 from bot.models.base import Base
 from bot.models.enums import ProviderEnum
 
@@ -27,8 +28,10 @@ class Product(Base):
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), nullable=False)
     last_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
     # Relationships
     trackings: Mapped[list['Tracking']] = relationship(

@@ -3,6 +3,7 @@
 from collections import deque
 from datetime import datetime, timedelta
 
+from bot.core.clock import utcnow
 from bot.core.config import settings
 from bot.models.enums import ProviderEnum, ProviderStatus
 
@@ -17,11 +18,11 @@ class HealthMonitor:
 
     def record_success(self, provider: ProviderEnum) -> None:
         """Record a successful provider call."""
-        self.last_success[provider] = datetime.utcnow()
+        self.last_success[provider] = utcnow()
 
     def record_error(self, provider: ProviderEnum, error: str) -> None:
         """Record a provider error."""
-        self.errors[provider].append((datetime.utcnow(), error))
+        self.errors[provider].append((utcnow(), error))
         self._clean_old_errors(provider)
 
     def get_status(self, provider: ProviderEnum) -> ProviderStatus:
@@ -51,7 +52,7 @@ class HealthMonitor:
     def _clean_old_errors(self, provider: ProviderEnum) -> None:
         """Remove errors outside the time window."""
         window = timedelta(seconds=settings.provider_error_window_seconds)
-        cutoff = datetime.utcnow() - window
+        cutoff = utcnow() - window
 
         while self.errors[provider] and self.errors[provider][0][0] < cutoff:
             self.errors[provider].popleft()

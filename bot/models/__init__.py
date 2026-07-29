@@ -7,4 +7,4 @@ from bot.models.product import Product
 from bot.models.tracking import Tracking
 from bot.models.user import User
 
-__all__ = ['Base', 'init_db', 'User', 'Product', 'Tracking', 'PriceHistory', 'ProviderEnum', 'ProviderStatus']
+__all__ = ['Base', 'PriceHistory', 'Product', 'ProviderEnum', 'ProviderStatus', 'Tracking', 'User', 'init_db']
