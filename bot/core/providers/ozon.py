@@ -20,6 +20,8 @@ import re
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse, urlunparse
 
+from playwright.async_api import Error as PlaywrightError
+
 from bot.core.logging import get_logger
 from bot.core.providers.base import (
     PriceNotFoundError,
@@ -57,6 +59,9 @@ _BLOCK_MARKERS = (
 # Digits in a rendered price are separated by thin / non-breaking spaces.
 _SPACES = dict.fromkeys(map(ord, '    '), None)
 
+# Per-unit rates that sit inside the price widget alongside the actual price.
+_PER_UNIT_RE = re.compile(r'(\bза\b|/\s*(шт|кг|г|л|мл|м)\b|₽\s*/)', re.IGNORECASE)
+
 
 class OzonProvider(Provider):
     """Fetch product title and price from an Ozon product page."""
@@ -81,9 +86,15 @@ class OzonProvider(Provider):
     async def fetch_product(self, url: str) -> ProductData:
         await throttle.wait(self.provider_type)
         async with self._session.page() as page:
-            arrived = await self._open_product(page, url)
-            html = await page.content()
-            widget_text = await self._widget_text(page) if arrived else ''
+            try:
+                arrived = await self._open_product(page, url)
+                html = await page.content()
+                widget_text = await self._widget_text(page) if arrived else ''
+            except PlaywrightError as exc:
+                # Navigation timeouts and closed pages are how a block presents
+                # itself here. Playwright's TimeoutError does not subclass the
+                # builtin one, so this catches its Error base instead.
+                raise ProviderBlockedError(f'Ozon did not serve the product page: {exc}') from exc
 
         if not arrived:
             raise ProviderBlockedError(self._block_reason(html))
@@ -193,21 +204,36 @@ class OzonProvider(Provider):
 
     @staticmethod
     def _price_from_widget(widget_text: str) -> Decimal | None:
-        """Pick the regular price out of the widget's rouble figures.
+        """Pick the regular price out of the widget, or refuse to guess.
 
-        The widget renders, in order: the Ozon-card price, the regular price and
-        the struck-through old price. The regular one is the second, which is
-        also what JSON-LD reports — so the fallback agrees with the primary path.
+        A full widget renders three figures in order — the Ozon-card price, the
+        regular price and the struck-through old price — plus, often, a per-unit
+        figure like "218 ₽ за 100 гр" that must not be mistaken for the price.
+
+        Only two shapes are read. Three figures: the middle one, which was
+        checked against the same page's JSON-LD and matched. One figure: itself.
+        Anything else is ambiguous — with two figures there is no telling a
+        card-plus-regular pair from a regular-plus-struck-through one, and
+        choosing wrong stores a price out by a factor of two and fires a false
+        "price changed" alert to everyone tracking the product. Returning
+        nothing costs one poll; guessing costs trust.
         """
         prices = []
-        for raw in re.findall(r'([\d    ]{2,15})\s*₽', widget_text):
-            try:
-                prices.append(Decimal(raw.translate(_SPACES)))
-            except (InvalidOperation, ValueError):
+        for line in widget_text.splitlines():
+            # "218 ₽ за 100 гр", "1 200 ₽/шт" — a unit rate, not the price.
+            if _PER_UNIT_RE.search(line):
                 continue
-        if len(prices) >= 2:
+            for raw in re.findall(r'([\d    ]{2,15})\s*₽', line):
+                try:
+                    prices.append(Decimal(raw.translate(_SPACES)))
+                except (InvalidOperation, ValueError):
+                    continue
+
+        if len(prices) == 3:
             return prices[1]
-        return prices[0] if prices else None
+        if len(prices) == 1:
+            return prices[0]
+        return None
 
     @staticmethod
     def _title_from_regex(html: str) -> str | None:

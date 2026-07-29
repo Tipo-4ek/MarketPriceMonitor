@@ -62,7 +62,6 @@ class BrowserSession:
             return self._context
 
         self._profile_dir.mkdir(parents=True, exist_ok=True)
-        self._playwright = await async_playwright().start()
 
         launch_kwargs: dict = {
             'user_data_dir': str(self._profile_dir),
@@ -82,9 +81,21 @@ class BrowserSession:
             'Starting browser session',
             extra={'channel': self._channel or 'bundled-chromium', 'headless': self._headless},
         )
-        self._context = await self._playwright.chromium.launch_persistent_context(**launch_kwargs)
-        await self._context.add_init_script(_STEALTH_INIT)
-        return self._context
+
+        # start() spawns a node driver process. If the launch below fails — no
+        # Chrome installed, a stale profile lock — that process must be reaped
+        # here, or a persistently failing launch leaks one per attempt.
+        playwright = await async_playwright().start()
+        try:
+            context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
+            await context.add_init_script(_STEALTH_INIT)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await playwright.stop()
+            raise
+
+        self._playwright, self._context = playwright, context
+        return context
 
     @contextlib.asynccontextmanager
     async def page(self) -> AsyncIterator[Page]:

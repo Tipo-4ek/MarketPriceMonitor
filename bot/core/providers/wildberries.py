@@ -21,6 +21,8 @@ import re
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
+from playwright.async_api import Error as PlaywrightError
+
 from bot.core.logging import get_logger
 from bot.core.providers.base import (
     PriceNotFoundError,
@@ -79,10 +81,15 @@ class WildberriesProvider(Provider):
                     await page.goto(product_url, wait_until='domcontentloaded', timeout=60_000)
                 response = await response_info.value
                 payload = await response.json()
-            except TimeoutError as exc:
-                # The page loaded but never issued (or was refused) its own card
-                # request — that is what a Wildberries block looks like from here.
-                raise ProviderBlockedError('Wildberries did not serve its card API (anti-bot)') from exc
+            except PlaywrightError as exc:
+                # Playwright's TimeoutError does NOT subclass the builtin one —
+                # it derives from playwright's Error — so catching the builtin
+                # here would let every block escape the taxonomy untyped.
+                #
+                # Reaching this means the page loaded but never issued (or was
+                # refused) its own card request, which is what a Wildberries
+                # block looks like from the outside.
+                raise ProviderBlockedError(f'Wildberries did not serve its card API: {exc}') from exc
 
         return self._parse(payload, article, product_url)
 
