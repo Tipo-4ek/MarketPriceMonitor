@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 from decimal import Decimal
+from html import escape
 
 from aiogram import Bot
 from sqlalchemy import select
@@ -18,6 +19,9 @@ from bot.models.enums import ProviderEnum, ProviderStatus
 
 logger = get_logger(__name__)
 
+# How many cycles a DOWN provider is left alone before it is tried again.
+_DOWN_BACKOFF_CYCLES = 4
+
 
 class PriceScheduler:
     """Poll every tracked product on an interval and notify on price moves."""
@@ -26,6 +30,7 @@ class PriceScheduler:
         self.bot = bot
         self.provider_registry = provider_registry
         self._stop = asyncio.Event()
+        self._down_cycles: dict[ProviderEnum, int] = {}
 
     async def start(self) -> None:
         """Run the polling loop until :meth:`stop` is called."""
@@ -53,24 +58,61 @@ class PriceScheduler:
 
         logger.info('Price scheduler stopped')
 
+    def _pollable_providers(self) -> set[ProviderEnum]:
+        """Decide which marketplaces to contact this cycle.
+
+        A provider the health monitor has marked DOWN is left alone for a few
+        cycles. Hammering a marketplace that is actively refusing us is both the
+        fastest way to stay refused and the rudest thing this bot can do.
+        """
+        pollable = set()
+        for provider in ProviderEnum:
+            if health_monitor.get_status(provider) is not ProviderStatus.DOWN:
+                self._down_cycles.pop(provider, None)
+                pollable.add(provider)
+                continue
+
+            waited = self._down_cycles.get(provider, 0) + 1
+            if waited >= _DOWN_BACKOFF_CYCLES:
+                self._down_cycles[provider] = 0
+                pollable.add(provider)
+            else:
+                self._down_cycles[provider] = waited
+                logger.info(
+                    'Skipping a provider that is down',
+                    extra={'provider': provider.value, 'cycles_waited': waited},
+                )
+        return pollable
+
     async def _check_prices(self) -> None:
         """Check prices for all tracked products."""
         if not base.async_session_maker:
             return
 
+        pollable = self._pollable_providers()
+
         async with base.async_session_maker() as session:
             # Only products somebody still tracks. `/remove` deletes the
             # tracking and leaves the product row, so a plain select(Product)
             # would keep scraping items nobody asked about.
-            result = await session.execute(select(Product).join(Tracking).distinct())
-            products = result.scalars().all()
+            result = await session.execute(
+                select(Product.id).join(Tracking).where(Product.provider.in_(pollable)).distinct()
+            )
+            product_ids = list(result.scalars().all())
 
-            logger.info('Checking prices', extra={'product_count': len(products)})
+        logger.info('Checking prices', extra={'product_count': len(product_ids)})
 
-            for product in products:
-                if self._stop.is_set():
-                    return
-                await self._check_product_price(session, product)
+        for product_id in product_ids:
+            if self._stop.is_set():
+                return
+            # One session per product. Sharing a session means a rollback for
+            # one product expires every other object in it, and the next
+            # attribute read raises MissingGreenlet — silently skipping the rest
+            # of the cycle.
+            async with base.async_session_maker() as session:
+                product = await session.get(Product, product_id)
+                if product is not None:
+                    await self._check_product_price(session, product)
 
     async def _check_product_price(self, session: AsyncSession, product: Product) -> None:
         """Fetch one product's price, persist a change and notify its trackers."""
@@ -135,12 +177,15 @@ class PriceScheduler:
             message = get_text(
                 user.locale,
                 'price_changed',
-                title=product.title,
+                # Title, currency and URL come from a marketplace page and go
+                # into a parse_mode='HTML' message: a '&' or '<' in a product
+                # name makes Telegram reject the whole notification.
+                title=escape(product.title),
                 old_price=old_price,
                 new_price=new_price,
-                currency=product.currency,
+                currency=escape(product.currency),
                 change=f'{change_percent:.1f}',
-                url=product.url,
+                url=escape(product.url, quote=True),
             )
             await self.bot.send_message(user.tg_user_id, message, parse_mode='HTML', disable_web_page_preview=True)
             logger.info('Notified user', extra={'tg_user_id': user.tg_user_id, 'product_id': product.id})
