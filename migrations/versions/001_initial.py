@@ -6,16 +6,16 @@ Create Date: 2024-01-01 00:00:00.000000
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '001'
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column(
             'provider',
-            sa.Enum('OZON', 'AVITO', 'WILDBERRIES', 'YANDEX_MARKET', name='providerenum'),
+            sa.Enum('OZON', 'WILDBERRIES', name='providerenum'),
             nullable=False,
         ),
         sa.Column('url', sa.String(length=1024), nullable=False),
@@ -90,4 +90,7 @@ def downgrade() -> None:
     op.drop_table('products')
     op.drop_index(op.f('ix_users_tg_user_id'), table_name='users')
     op.drop_table('users')
-    op.execute('DROP TYPE providerenum')
+    # Postgres keeps the enum type after the table is gone; SQLite has no
+    # such type, so the statement is dialect-guarded.
+    if op.get_bind().dialect.name == 'postgresql':
+        op.execute('DROP TYPE providerenum')

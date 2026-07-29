@@ -1,13 +1,14 @@
 """Alembic environment configuration."""
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from bot.core.config import settings
 
 # Import all models to ensure they're registered
 from bot.models import PriceHistory, Product, Tracking, User  # noqa: F401
@@ -22,9 +23,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set database URL from environment
-database_url = os.getenv('DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker')
-config.set_main_option('sqlalchemy.url', database_url)
+# Migrations read the same Settings object as the bot, so `alembic upgrade head`
+# and the running application can never disagree about which database they mean.
+config.set_main_option('sqlalchemy.url', settings.database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
