@@ -1,78 +1,68 @@
-"""Ozon marketplace provider built on Playwright.
+"""Ozon provider: read the price out of the rendered product page.
 
-A single, maintainable browser strategy replaces the previous pile of
-bypass variants: launch a Chromium context with realistic fingerprint and
-locale, render the product page, and read the price from the page's
-JSON-LD block (with regex fallbacks). Anti-bot measures on marketplaces
-evolve; this provider reflects a workable approach and exposes a
-``headless`` toggle because a headed browser on a residential host is far
-less likely to be challenged than a headless one in a datacenter.
+Extraction order, in the order they were verified against a live page:
+
+1. **JSON-LD** — ``<script type="application/ld+json">`` still carries an
+   ``offers.price``. That is the regular price, i.e. what you pay without an
+   Ozon-card discount, which is the stable thing to track: the card price
+   depends on who is looking.
+2. **The price widget** — ``[data-widget="webPrice"]`` as a fallback. Ozon's CSS
+   class names are hashed and change between deploys, so the ``data-widget``
+   attribute is the only durable anchor; the numbers inside are read as text.
+
+The internal ``entrypoint-api.bx`` JSON endpoint is deliberately not used: it
+answers 403 even to a request issued from the product page's own context.
 """
 
 import asyncio
 import json
-import random
 import re
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse, urlunparse
 
-from playwright.async_api import async_playwright
-
-from bot.core.config import settings
 from bot.core.logging import get_logger
-from bot.core.providers.anti_bot.proxy_provider import ProxyProvider
-from bot.core.providers.anti_bot.user_agent_pool import UserAgentPool
-from bot.core.providers.base import ProductData, Provider
+from bot.core.providers.base import (
+    PriceNotFoundError,
+    ProductData,
+    Provider,
+    ProviderBlockedError,
+)
+from bot.core.providers.browser import BrowserSession, browser_session
+from bot.core.providers.throttle import throttle
 from bot.models.enums import ProviderEnum
 
 logger = get_logger(__name__)
 
 _OZON_HOSTS = ('ozon.ru', 'www.ozon.ru', 'm.ozon.ru')
 
+# The only durable anchor on the page: Ozon's CSS class names are hashed and
+# change between deploys, the data-widget attributes do not.
+_PRICE_WIDGET = '[data-widget="webPrice"]'
+
+# A warm profile arrives in a few seconds; a cold one has to sit through the
+# challenge first, which is what the longer warm-up budget is for.
+_ARRIVE_TIMEOUT_MS = 25_000
+_WARMUP_TIMEOUT_MS = 45_000
+
 # Signals that Ozon served a challenge / block page instead of the product.
 _BLOCK_MARKERS = (
+    'antibot challenge',
     'доступ ограничен',
     'access denied',
     'checking your browser',
     'ddos-guard',
-    'antibot',
     'captcha',
 )
 
-# Minimal anti-automation shim. Kept readable on purpose — no obfuscation.
-_STEALTH_INIT = """
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-    window.chrome = window.chrome || {runtime: {}};
-    const origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) =>
-        parameters.name === 'notifications'
-            ? Promise.resolve({state: Notification.permission})
-            : origQuery(parameters);
-"""
+# Digits in a rendered price are separated by thin / non-breaking spaces.
+_SPACES = dict.fromkeys(map(ord, '    '), None)
 
 
 class OzonProvider(Provider):
     """Fetch product title and price from an Ozon product page."""
 
-    def __init__(self) -> None:
-        self.user_agent_pool = UserAgentPool()
-        self.proxy_provider = self._init_proxy_provider()
-
-    @staticmethod
-    def _init_proxy_provider() -> ProxyProvider | None:
-        """Build a proxy pool from configuration, if any is provided."""
-        if settings.proxy_file:
-            provider = ProxyProvider(proxy_file=settings.proxy_file)
-            if provider.has_proxies():
-                logger.info('Loaded %d proxies from %s', provider.pool_size(), settings.proxy_file)
-                return provider
-            logger.warning('Proxy file %s configured but no proxies were loaded', settings.proxy_file)
-            return None
-        if settings.proxy_url:
-            logger.info('Using single configured proxy URL')
-            return ProxyProvider(proxy_url=settings.proxy_url)
-        logger.info('No proxy configured — Ozon may block requests from unknown IPs')
-        return None
+    def __init__(self, session: BrowserSession | None = None) -> None:
+        self._session = session or browser_session
 
     @property
     def provider_type(self) -> ProviderEnum:
@@ -89,94 +79,91 @@ class OzonProvider(Provider):
         return urlunparse(parsed._replace(query='', fragment=''))
 
     async def fetch_product(self, url: str) -> ProductData:
-        html = await self._render(url)
-        return self._parse(html, url)
+        await throttle.wait(self.provider_type)
+        async with self._session.page() as page:
+            arrived = await self._open_product(page, url)
+            html = await page.content()
+            widget_text = await self._widget_text(page) if arrived else ''
 
-    # --- rendering -------------------------------------------------------
+        if not arrived:
+            raise ProviderBlockedError(self._block_reason(html))
 
-    def _pick_proxy(self) -> dict | None:
-        if self.proxy_provider and self.proxy_provider.has_proxies():
-            return self.proxy_provider.get_random_proxy()
-        return None
+        title = self._title(html) or 'Unknown product'
+        price = self._price(html, widget_text)
+        if price is None:
+            raise PriceNotFoundError('Could not read a price from the Ozon page')
 
-    async def _render(self, url: str) -> str:
-        """Render the product page and return its HTML."""
-        proxy = self._pick_proxy()
-        proxy_config = None
-        if proxy:
-            proxy_config = {'server': proxy['server']}
-            if proxy.get('username') and proxy.get('password'):
-                proxy_config['username'] = proxy['username']
-                proxy_config['password'] = proxy['password']
-            logger.info('Using proxy %s', proxy['server'])
+        return ProductData(title=title, price=price, currency='RUB', url=url)
 
-        playwright = browser = context = None
+    # --- page handling ---------------------------------------------------
+
+    async def _open_product(self, page, url: str) -> bool:
+        """Open the product page, warming up through the homepage if challenged.
+
+        A cold browser profile is challenged on its first request and needs a
+        while to be let through; a warm one arrives in seconds. Rather than pay
+        a homepage visit on every poll, we try the product directly and only
+        warm up when that did not work.
+        """
+        await page.goto(url, wait_until='domcontentloaded', timeout=60_000)
+        if await self._await_product(page, timeout_ms=_ARRIVE_TIMEOUT_MS):
+            return True
+
+        logger.info('Ozon challenged the request; warming up via the homepage')
+        await page.goto('https://www.ozon.ru/', wait_until='domcontentloaded', timeout=60_000)
+        await self._await_product(page, selector='a[href*="/product/"]', timeout_ms=_WARMUP_TIMEOUT_MS)
+        await asyncio.sleep(2)
+
+        await page.goto(url, wait_until='domcontentloaded', timeout=60_000)
+        return await self._await_product(page, timeout_ms=_ARRIVE_TIMEOUT_MS)
+
+    @staticmethod
+    async def _await_product(page, selector: str = _PRICE_WIDGET, timeout_ms: int = 20_000) -> bool:
+        """Wait for a marker that only the real product page carries.
+
+        Waiting for the product itself, rather than for the challenge title to
+        disappear, is the reliable signal: the challenge swaps the title several
+        times before it gives up or lets you through.
+        """
         try:
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.launch(
-                headless=settings.headless_enabled,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--lang=ru-RU',
-                ],
-            )
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent=self.user_agent_pool.get_random(),
-                locale='ru-RU',
-                timezone_id='Europe/Moscow',
-                proxy=proxy_config,
-                extra_http_headers={
-                    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                },
-            )
-            await context.add_init_script(_STEALTH_INIT)
-            page = await context.new_page()
+            await page.wait_for_selector(selector, timeout=timeout_ms, state='attached')
+        except Exception:
+            return False
+        return True
 
-            # Warm up on the homepage so Ozon sets its baseline cookies.
-            try:
-                await page.goto('https://www.ozon.ru/', wait_until='domcontentloaded', timeout=20000)
-                await asyncio.sleep(random.uniform(1.5, 3.0))
-            except Exception as exc:  # noqa: BLE001 - warmup is best-effort
-                logger.debug('Homepage warmup failed (continuing): %s', exc)
+    @staticmethod
+    async def _widget_text(page) -> str:
+        try:
+            return await page.eval_on_selector(_PRICE_WIDGET, 'e => e.innerText')
+        except Exception:
+            # The widget is simply absent on some cards; JSON-LD may still
+            # carry the price, so this is not a failure on its own.
+            return ''
 
-            logger.info('Fetching Ozon product: %s', url)
-            await page.goto(url, wait_until='domcontentloaded', timeout=40000)
-            await asyncio.sleep(random.uniform(2.0, 4.0))
-            return await page.content()
-        finally:
-            if context:
-                await context.close()
-            if browser:
-                await browser.close()
-            if playwright:
-                await playwright.stop()
+    @staticmethod
+    def _block_reason(html: str) -> str:
+        """Name the challenge we hit, for the log and the health monitor."""
+        lowered = html[:20_000].lower()
+        marker = next((m for m in _BLOCK_MARKERS if m in lowered), None)
+        if marker:
+            return f'Ozon served an anti-bot page (matched {marker!r})'
+        return 'Ozon did not render the product page within the timeout'
 
     # --- parsing ---------------------------------------------------------
 
-    def _parse(self, html: str, url: str) -> ProductData:
-        lowered = html[:5000].lower()
-        if any(marker in lowered for marker in _BLOCK_MARKERS):
-            raise ValueError('Ozon blocked the request (anti-bot challenge)')
-
-        title = price = None
+    def _price(self, html: str, widget_text: str) -> Decimal | None:
         json_ld = self._extract_json_ld(html)
         if json_ld:
-            title = json_ld.get('name')
             price = self._price_from_offers(json_ld.get('offers'))
+            if price is not None:
+                return price
+        return self._price_from_widget(widget_text)
 
-        if price is None:
-            price = self._price_from_regex(html)
-        if not title:
-            title = self._title_from_regex(html)
-
-        if price is None:
-            raise ValueError('Could not extract price from Ozon page')
-
-        return ProductData(title=title or 'Unknown product', price=price, currency='RUB', url=url)
+    def _title(self, html: str) -> str | None:
+        json_ld = self._extract_json_ld(html)
+        if json_ld and json_ld.get('name'):
+            return str(json_ld['name']).strip()
+        return self._title_from_regex(html)
 
     @staticmethod
     def _extract_json_ld(html: str) -> dict | None:
@@ -205,18 +192,22 @@ class OzonProvider(Provider):
         return None
 
     @staticmethod
-    def _price_from_regex(html: str) -> Decimal | None:
-        for pattern in (r'"cardPrice":\s*"?(\d+)"?', r'"price":\s*"?(\d[\d\s]*)\s*₽?"?'):
-            match = re.search(pattern, html)
-            if match:
-                digits = match.group(1).replace(' ', '').replace('\xa0', '')
-                try:
-                    value = Decimal(digits)
-                except (InvalidOperation, ValueError):
-                    continue
-                if 10 < value < 100_000_000:
-                    return value
-        return None
+    def _price_from_widget(widget_text: str) -> Decimal | None:
+        """Pick the regular price out of the widget's rouble figures.
+
+        The widget renders, in order: the Ozon-card price, the regular price and
+        the struck-through old price. The regular one is the second, which is
+        also what JSON-LD reports — so the fallback agrees with the primary path.
+        """
+        prices = []
+        for raw in re.findall(r'([\d    ]{2,15})\s*₽', widget_text):
+            try:
+                prices.append(Decimal(raw.translate(_SPACES)))
+            except (InvalidOperation, ValueError):
+                continue
+        if len(prices) >= 2:
+            return prices[1]
+        return prices[0] if prices else None
 
     @staticmethod
     def _title_from_regex(html: str) -> str | None:

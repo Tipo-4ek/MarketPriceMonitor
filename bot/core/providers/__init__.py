@@ -1,34 +1,30 @@
-"""Provider registry and initialization."""
+"""Provider registry: routes an incoming URL to the provider that claims it."""
 
-from bot.core.providers.avito import AvitoProvider
-from bot.core.providers.base import Provider
+from bot.core.providers.base import Provider, UnsupportedURLError
 from bot.core.providers.ozon import OzonProvider
 from bot.core.providers.wildberries import WildberriesProvider
-from bot.core.providers.yandex_market import YandexMarketProvider
 from bot.models.enums import ProviderEnum
 
 
 class ProviderRegistry:
     """Registry for all marketplace providers."""
 
-    def __init__(self):
-        self.providers: dict[ProviderEnum, Provider] = {
+    def __init__(self, providers: dict[ProviderEnum, Provider] | None = None):
+        self.providers: dict[ProviderEnum, Provider] = providers or {
             ProviderEnum.OZON: OzonProvider(),
-            ProviderEnum.AVITO: AvitoProvider(),
             ProviderEnum.WILDBERRIES: WildberriesProvider(),
-            ProviderEnum.YANDEX_MARKET: YandexMarketProvider(),
         }
 
     def get_provider(self, provider_type: ProviderEnum) -> Provider | None:
         """Get provider by type."""
         return self.providers.get(provider_type)
 
-    def find_provider(self, url: str) -> Provider | None:
-        """Find provider that supports the given URL."""
+    def find_provider(self, url: str) -> Provider:
+        """Find the provider that supports this URL, or refuse the URL."""
         for provider in self.providers.values():
             if provider.supports(url):
                 return provider
-        return None
+        raise UnsupportedURLError(f'No provider supports this URL: {url}')
 
 
 # Global provider registry

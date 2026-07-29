@@ -10,24 +10,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             '📖 Доступные команды:\n\n'
             '/add <url> - добавить товар для отслеживания\n'
             '/list - показать отслеживаемые товары\n'
-            '/remove <id|url> - удалить товар из отслеживания\n'
-            '/monitor default <delta> - установить порог изменения цены по умолчанию (%)\n'
-            '/monitor set <id> <delta> - установить порог для конкретного товара (%)\n'
+            '/remove <id> - удалить товар из отслеживания\n'
+            '/monitor set <id> <delta> - установить порог изменения цены для товара (%)\n'
             '/lang <ru|en> - изменить язык\n\n'
+            'Поддерживаются Ozon и Wildberries.\n'
             'Вы также можете просто отправить ссылку на товар без команды /add.'
         ),
         'language_changed': '✅ Язык изменен на русский',
         'invalid_language': '❌ Неподдерживаемый язык. Доступны: ru, en',
         'product_added': '✅ Товар добавлен:\n<b>{title}</b>\nЦена: {price} {currency}\nID: {product_id}',
         'product_exists': '⚠️ Этот товар уже отслеживается (ID: {product_id})',
-        'invalid_url': '❌ Неподдерживаемая ссылка. Пока поддерживается только Ozon.',
+        'invalid_url': '❌ Неподдерживаемая ссылка. Поддерживаются Ozon и Wildberries.',
         'provider_error': '❌ Не удалось получить информацию о товаре. Попробуйте позже.',
+        'provider_blocked': '🚧 Маркетплейс сейчас не отдаёт страницу (защита от ботов). Попробуйте позже.',
+        'price_not_found': '❌ Страница открылась, но цену найти не удалось. Возможно, товара нет в наличии.',
         'tracked_products': '📦 Ваши отслеживаемые товары:\n\n{products}',
+        'tracked_product_entry': (
+            '<b>ID:</b> {product_id}\n'
+            '<b>📦 {title}</b>\n'
+            '💰 Цена: {price} {currency}\n'
+            '🏪 Магазин: {provider}\n'
+            '📊 Порог: {threshold}\n'
+            '🔗 <a href="{url}">Ссылка на товар</a>'
+        ),
+        'threshold_default': 'по умолчанию',
         'no_tracked_products': '📭 У вас нет отслеживаемых товаров',
         'product_removed': '✅ Товар удален из отслеживания',
         'product_not_found': '❌ Товар не найден',
         'invalid_product_id': '❌ Неверный ID товара',
-        'default_threshold_set': '✅ Порог по умолчанию установлен: {delta}%',
         'custom_threshold_set': '✅ Порог для товара {product_id} установлен: {delta}%',
         'invalid_threshold': '❌ Неверное значение порога. Укажите число от 1 до 100.',
         'price_changed': (
@@ -53,24 +63,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             '📖 Available commands:\n\n'
             '/add <url> - add product to track\n'
             '/list - show tracked products\n'
-            '/remove <id|url> - remove product from tracking\n'
-            '/monitor default <delta> - set default price change threshold (%)\n'
-            '/monitor set <id> <delta> - set threshold for specific product (%)\n'
+            '/remove <id> - remove product from tracking\n'
+            '/monitor set <id> <delta> - set price change threshold for a product (%)\n'
             '/lang <ru|en> - change language\n\n'
+            'Ozon and Wildberries are supported.\n'
             'You can also just send a product link without the /add command.'
         ),
         'language_changed': '✅ Language changed to English',
         'invalid_language': '❌ Unsupported language. Available: ru, en',
         'product_added': '✅ Product added:\n<b>{title}</b>\nPrice: {price} {currency}\nID: {product_id}',
         'product_exists': '⚠️ This product is already tracked (ID: {product_id})',
-        'invalid_url': '❌ Unsupported link. Only Ozon is supported for now.',
+        'invalid_url': '❌ Unsupported link. Ozon and Wildberries are supported.',
         'provider_error': '❌ Failed to fetch product information. Try again later.',
+        'provider_blocked': '🚧 The marketplace is not serving the page right now (anti-bot). Try again later.',
+        'price_not_found': '❌ The page opened, but no price could be read. The item may be out of stock.',
         'tracked_products': '📦 Your tracked products:\n\n{products}',
+        'tracked_product_entry': (
+            '<b>ID:</b> {product_id}\n'
+            '<b>📦 {title}</b>\n'
+            '💰 Price: {price} {currency}\n'
+            '🏪 Store: {provider}\n'
+            '📊 Threshold: {threshold}\n'
+            '🔗 <a href="{url}">Open product</a>'
+        ),
+        'threshold_default': 'default',
         'no_tracked_products': '📭 You have no tracked products',
         'product_removed': '✅ Product removed from tracking',
         'product_not_found': '❌ Product not found',
         'invalid_product_id': '❌ Invalid product ID',
-        'default_threshold_set': '✅ Default threshold set: {delta}%',
         'custom_threshold_set': '✅ Threshold for product {product_id} set: {delta}%',
         'invalid_threshold': '❌ Invalid threshold value. Specify a number from 1 to 100.',
         'price_changed': (
@@ -100,14 +120,3 @@ def get_text(locale: str, key: str, **kwargs: Any) -> str:
     if kwargs:
         return text.format(**kwargs)
     return text
-
-
-class I18n:
-    """Internationalization helper."""
-
-    def __init__(self, default_locale: str = 'ru'):
-        self.default_locale = default_locale
-
-    def get(self, locale: str | None, key: str, **kwargs: Any) -> str:
-        """Get localized text."""
-        return get_text(locale or self.default_locale, key, **kwargs)
