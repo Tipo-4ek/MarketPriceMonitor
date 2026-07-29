@@ -2,31 +2,70 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ends of the range pyproject declares, so the claim is checked
+        # rather than asserted.
+        python-version: ['3.13', '3.14']
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
-        run: pipx install poetry
+        run: pipx install poetry==2.4.1
+
+      - name: Cache the virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Check that poetry.lock matches pyproject.toml
+        run: poetry check --lock
 
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction
 
       - name: Lint (ruff)
-        run: poetry run ruff check .
+        run: poetry run ruff check --output-format=github .
 
       - name: Check formatting (ruff)
         run: poetry run ruff format --check .
 
       - name: Run tests
-        run: poetry run pytest -v
+        run: poetry run pytest -q
+
+  docker:
+    # The README documents a Docker path, so CI builds the image and runs the
+    # suite inside it. A container that only builds on the author's laptop is
+    # not a container anybody else can use.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the runtime image
+        run: docker build --target runtime -t market-price-monitor:ci .
+
+      - name: Build the test image and run the suite in it
+        run: |
+          docker build --target dev -t market-price-monitor:ci-dev .
+          docker run --rm market-price-monitor:ci-dev
