@@ -11,7 +11,7 @@ from bot.models import Product, User
 async def test_custom_threshold(db_session: AsyncSession, sample_user: User, sample_product: Product):
     """Test setting custom threshold for tracking."""
     # Add tracking
-    tracking, _ = await TrackingService.add_tracking(db_session, sample_user, sample_product)
+    _tracking, _ = await TrackingService.add_tracking(db_session, sample_user, sample_product)
     await db_session.commit()
 
     # Set custom threshold

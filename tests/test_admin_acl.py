@@ -9,12 +9,12 @@ from bot.core.middlewares.admin_acl import AdminACL
 
 
 @pytest.mark.asyncio
-async def test_admin_acl_admin_user():
-    """Test ACL for admin user."""
+async def test_admin_acl_admin_user(isolated_settings):
+    """A user listed in ADMIN_TG_IDS is flagged as an admin."""
     middleware = AdminACL()
 
-    # Mock admin user (using ID from settings)
-    mock_user = TgUser(id=123456789, is_bot=False, first_name='Admin')
+    admin_id = isolated_settings.admin_ids[0]
+    mock_user = TgUser(id=admin_id, is_bot=False, first_name='Admin')
 
     data = {'event_from_user': mock_user}
 
@@ -23,10 +23,7 @@ async def test_admin_acl_admin_user():
 
     await middleware(handler, event, data)
 
-    # Check if is_admin flag was set
-    # Note: This will depend on actual ADMIN_TG_IDS in environment
-    # For test purposes, we just verify the middleware runs
-    assert 'is_admin' in data
+    assert data['is_admin'] is True
     handler.assert_called_once()
 
 

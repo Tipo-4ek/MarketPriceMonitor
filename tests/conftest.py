@@ -6,13 +6,36 @@ running Postgres. Override TEST_DATABASE_URL to point at another engine.
 
 import os
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from bot.core.config import settings
 from bot.models.base import Base
 
 TEST_DATABASE_URL = os.getenv('TEST_DATABASE_URL', 'sqlite+aiosqlite://')
+
+# Values the assertions below are written against. `settings` is a module-level
+# singleton that reads the developer's real .env at import time, so without this
+# the suite passes or fails depending on whose machine it runs on — exporting
+# ADMIN_TG_IDS or ALERT_COOLDOWN_HOURS was enough to turn it red.
+_TEST_SETTINGS = {
+    'admin_tg_ids': '123456789',
+    'default_locale': 'ru',
+    'default_threshold_delta': 5,
+    'alert_cooldown_hours': 24,
+    'provider_error_window_seconds': 300,
+    'provider_error_threshold': 5,
+}
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch):
+    """Pin the settings the tests assert on, whatever the ambient environment."""
+    for name, value in _TEST_SETTINGS.items():
+        monkeypatch.setattr(settings, name, value)
+    return settings
 
 
 def _make_engine():

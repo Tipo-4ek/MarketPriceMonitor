@@ -46,7 +46,7 @@ async def test_list_trackings(db_session: AsyncSession, sample_user: User, sampl
     trackings = await TrackingService.get_user_trackings(db_session, sample_user)
 
     assert len(trackings) == 1
-    tracking, product = trackings[0]
+    _tracking, product = trackings[0]
     assert product.id == sample_product.id
     assert product.title == sample_product.title
 

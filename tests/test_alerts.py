@@ -1,8 +1,9 @@
 """Tests for alert system."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from bot.core.alerts import AlertManager
+from bot.core.clock import utcnow
 from bot.models.enums import ProviderEnum, ProviderStatus
 
 
@@ -64,15 +65,20 @@ def test_alert_reset():
     assert alert_manager.should_send_alert(provider, status) is True
 
 
-def test_alert_cooldown_expired():
-    """Test alert after cooldown expires."""
+def test_alert_cooldown_expired(isolated_settings):
+    """An alert older than the cooldown is allowed through again."""
     alert_manager = AlertManager()
-    alert_manager.alert_cooldown_hours = 0  # Set to 0 for testing
     provider = ProviderEnum.OZON
     status = ProviderStatus.DOWN
 
-    # Record alert with old timestamp
-    alert_manager.last_alerts[(provider, status)] = datetime.utcnow() - timedelta(hours=25)
+    # Just inside the cooldown: still suppressed.
+    alert_manager.last_alerts[(provider, status)] = utcnow() - timedelta(
+        hours=isolated_settings.alert_cooldown_hours - 1
+    )
+    assert alert_manager.should_send_alert(provider, status) is False
 
-    # Alert should be sent (cooldown expired)
+    # Just past it: sent again.
+    alert_manager.last_alerts[(provider, status)] = utcnow() - timedelta(
+        hours=isolated_settings.alert_cooldown_hours + 1
+    )
     assert alert_manager.should_send_alert(provider, status) is True
