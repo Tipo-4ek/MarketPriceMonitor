@@ -1,7 +1,7 @@
 """Common handlers (start, help, lang)."""
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from bot.core.i18n import get_text
@@ -22,8 +22,7 @@ async def cmd_start(message: Message):
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
         await session.commit()
 
-        text = get_text(user.locale, 'welcome')
-        await message.answer(text)
+        await message.answer(get_text(user.locale, 'welcome'))
 
 
 @router.message(Command('help'))
@@ -31,34 +30,34 @@ async def cmd_help(message: Message):
     """Handle /help command."""
     async with base.async_session_maker() as session:
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
+        # get_or_create_user only flushes; without this commit a first-time user
+        # who starts with /help is rolled back and re-created on every command.
+        await session.commit()
 
-        text = get_text(user.locale, 'help')
-        await message.answer(text)
+        await message.answer(get_text(user.locale, 'help'))
 
 
 @router.message(Command('lang'))
-async def cmd_lang(message: Message):
+async def cmd_lang(message: Message, command: CommandObject):
     """Handle /lang command."""
-    args = message.text.split(maxsplit=1)
-
-    if len(args) < 2:
+    # CommandObject.args rather than message.text.split(): aiogram matches a
+    # command in a media caption too, where message.text is None.
+    if not command.args:
         await message.answer('Usage: /lang <ru|en>')
         return
 
-    locale = args[1].strip().lower()
-
-    if not validate_locale(locale):
-        async with base.async_session_maker() as session:
-            user = await TrackingService.get_or_create_user(session, message.from_user.id)
-            text = get_text(user.locale, 'invalid_language')
-            await message.answer(text)
-        return
+    locale = command.args.strip().lower()
 
     async with base.async_session_maker() as session:
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
+
+        if not validate_locale(locale):
+            await session.commit()
+            await message.answer(get_text(user.locale, 'invalid_language'))
+            return
+
         await TrackingService.update_user_locale(session, user, locale)
         await session.commit()
 
-        text = get_text(locale, 'language_changed')
-        await message.answer(text)
-        logger.info(f'User {message.from_user.id} changed locale to {locale}')
+        await message.answer(get_text(locale, 'language_changed'))
+        logger.info('Locale changed', extra={'tg_user_id': message.from_user.id, 'locale': locale})

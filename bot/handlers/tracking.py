@@ -1,12 +1,19 @@
 """Tracking handlers (add, list, remove)."""
 
+from html import escape
+
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from bot.core.i18n import get_text
 from bot.core.logging import get_logger
-from bot.core.providers import provider_registry
+from bot.core.providers.base import (
+    PriceNotFoundError,
+    ProviderBlockedError,
+    ProviderError,
+    UnsupportedURLError,
+)
 from bot.core.services.product_service import ProductService
 from bot.core.services.tracking_service import TrackingService
 from bot.models import base
@@ -19,16 +26,15 @@ router = Router()
 
 
 @router.message(Command('add'))
-async def cmd_add(message: Message):
+async def cmd_add(message: Message, command: CommandObject):
     """Handle /add command."""
-    args = message.text.split(maxsplit=1)
-
-    if len(args) < 2:
+    # CommandObject.args rather than message.text.split(): aiogram matches a
+    # command in a media caption too, where message.text is None.
+    if not command.args:
         await message.answer('Usage: /add <url>')
         return
 
-    url = args[1].strip()
-    await add_product(message, url)
+    await add_product(message, command.args.strip())
 
 
 @router.message(F.text.regexp(r'https?://'))
@@ -45,46 +51,49 @@ async def add_product(message: Message, url: str):
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
 
         try:
+            # get_or_create_product already fetches title and price for a new
+            # product; refetching here would mean two browser renders per /add.
             product, _ = await ProductService.get_or_create_product(session, url)
-            tracking, tracking_created = await TrackingService.add_tracking(session, user, product)
+            _tracking, tracking_created = await TrackingService.add_tracking(session, user, product)
             await session.commit()
 
             if tracking_created:
-                # Refresh title/price so the confirmation shows current data.
-                try:
-                    provider = provider_registry.find_provider(url)
-                    if provider:
-                        product_data = await provider.fetch_product(url)
-                        product.title = product_data.title
-                        product.last_price = product_data.price
-                        product.currency = product_data.currency
-                        await session.commit()
-                        logger.info(f'Refreshed product {product.id}: {product.title} - {product.last_price}')
-                except Exception as e:
-                    logger.warning(f'Could not refresh product data for {product.id}: {e}')
-
                 text = get_text(
                     user.locale,
                     'product_added',
-                    title=product.title,
+                    title=escape(product.title),
                     price=product.last_price,
-                    currency=product.currency,
+                    currency=escape(product.currency),
                     product_id=product.id,
                 )
-                logger.info(f'User {message.from_user.id} added product {product.id}')
+                logger.info('Product added', extra={'tg_user_id': message.from_user.id, 'product_id': product.id})
             else:
                 text = get_text(user.locale, 'product_exists', product_id=product.id)
 
             await message.answer(text, parse_mode='HTML')
 
-        except ValueError as e:
-            key = 'invalid_url' if 'Unsupported URL' in str(e) else 'provider_error'
-            await message.answer(get_text(user.locale, key), parse_mode='HTML')
-            logger.warning(f'Error adding product for user {message.from_user.id}: {e}')
+        except ProviderError as exc:
+            # Each failure mode gets its own message: "try again later" for a
+            # blocked marketplace is true, for an unsupported link it is a lie.
+            key = {
+                UnsupportedURLError: 'invalid_url',
+                ProviderBlockedError: 'provider_blocked',
+                PriceNotFoundError: 'price_not_found',
+            }.get(type(exc), 'provider_error')
+            await message.answer(get_text(user.locale, key))
+            logger.info(
+                'Could not add product',
+                extra={
+                    'tg_user_id': message.from_user.id,
+                    'url': url,
+                    'reason': type(exc).__name__,
+                    'error': str(exc),
+                },
+            )
 
-        except Exception as e:
-            await message.answer(get_text(user.locale, 'provider_error'), parse_mode='HTML')
-            logger.error(f'Error adding product for user {message.from_user.id}: {e}', exc_info=True)
+        except Exception:
+            await message.answer(get_text(user.locale, 'provider_error'))
+            logger.exception('Error adding product', extra={'tg_user_id': message.from_user.id, 'url': url})
 
 
 @router.message(Command('list'))
@@ -93,54 +102,62 @@ async def cmd_list(message: Message):
     async with base.async_session_maker() as session:
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
         trackings = await TrackingService.get_user_trackings(session, user)
+        await session.commit()
 
         if not trackings:
-            text = get_text(user.locale, 'no_tracked_products')
-            await message.answer(text)
+            await message.answer(get_text(user.locale, 'no_tracked_products'))
             return
 
-        products_text = []
+        entries = []
         for tracking, product in trackings:
-            threshold = tracking.custom_threshold_delta or '(default)'
-            products_text.append(
-                f'<b>ID:</b> {product.id}\n'
-                f'<b>📦 {product.title}</b>\n'
-                f'💰 Цена: {product.last_price} {product.currency}\n'
-                f'🏪 Магазин: {product.provider.value}\n'
-                f'📊 Порог: {threshold}%\n'
-                f'🔗 <a href="{product.url}">Ссылка на товар</a>'
+            threshold = (
+                f'{tracking.custom_threshold_delta}%'
+                if tracking.custom_threshold_delta
+                else get_text(user.locale, 'threshold_default')
+            )
+            entries.append(
+                get_text(
+                    user.locale,
+                    'tracked_product_entry',
+                    product_id=product.id,
+                    # Titles come from the marketplace page, so they are escaped
+                    # before going anywhere near parse_mode='HTML'.
+                    title=escape(product.title),
+                    price=product.last_price,
+                    currency=escape(product.currency),
+                    provider=product.provider.value,
+                    threshold=threshold,
+                    url=escape(product.url, quote=True),
+                )
             )
 
-        text = get_text(user.locale, 'tracked_products', products='\n\n'.join(products_text))
+        text = get_text(user.locale, 'tracked_products', products='\n\n'.join(entries))
         await message.answer(text, parse_mode='HTML', disable_web_page_preview=True)
 
 
 @router.message(Command('remove'))
-async def cmd_remove(message: Message):
+async def cmd_remove(message: Message, command: CommandObject):
     """Handle /remove command."""
-    args = message.text.split(maxsplit=1)
-
-    if len(args) < 2:
+    if not command.args:
         await message.answer('Usage: /remove <id>')
         return
 
-    product_id = validate_product_id(args[1].strip())
-
-    if not product_id:
-        async with base.async_session_maker() as session:
-            user = await TrackingService.get_or_create_user(session, message.from_user.id)
-            text = get_text(user.locale, 'invalid_product_id')
-            await message.answer(text)
-        return
+    product_id = validate_product_id(command.args.strip())
 
     async with base.async_session_maker() as session:
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
+
+        if not product_id:
+            await session.commit()
+            await message.answer(get_text(user.locale, 'invalid_product_id'))
+            return
+
         removed = await TrackingService.remove_tracking(session, user, product_id)
         await session.commit()
 
         if removed:
             text = get_text(user.locale, 'product_removed')
-            logger.info(f'User {message.from_user.id} removed product {product_id}')
+            logger.info('Product removed', extra={'tg_user_id': message.from_user.id, 'product_id': product_id})
         else:
             text = get_text(user.locale, 'product_not_found')
 
