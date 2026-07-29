@@ -35,7 +35,8 @@ does and does not work against live anti-bot systems.
   provider ([`health.py`](bot/core/providers/health.py)) drives an
   OK → DEGRADED → DOWN state machine, and admins get de-duplicated,
   cooldown-gated alerts ([`alerts.py`](bot/core/alerts.py)) on every status
-  transition, recovery included.
+  transition, recovery included. A provider marked DOWN is then skipped for
+  several cycles rather than retried on each one.
 - **A typed error taxonomy.** `UnsupportedURLError`, `ProviderBlockedError` and
   `PriceNotFoundError` are distinct, because "the marketplace is blocking us"
   and "this link is not supported" are different problems and deserve different
@@ -83,6 +84,7 @@ token, database or Telegram involved:
 poetry run market-price-check https://www.wildberries.ru/catalog/219279898/detail.aspx
 # OK    ETNA COFFEE Кофе в зернах 250 гр, Суль-де-Минас
 #       558 RUB  (wildberries)
+#       https://www.wildberries.ru/catalog/219279898/detail.aspx
 ```
 
 Exit code 0 means a price was read; 1 means the marketplace refused or the page
@@ -109,7 +111,7 @@ polls are fast.
 ### With Docker — database, migrations, tests
 
 ```bash
-cp .env.example .env
+cp .env.example .env    # BOT_TOKEN must be filled in, or the bot exits with a config error
 docker compose up --build
 ```
 
@@ -121,9 +123,15 @@ and, as described above, its providers will report themselves blocked.
 Tests run against an in-memory SQLite database and never touch the network.
 
 ```bash
-poetry run pytest -q                              # 44 tests
+poetry run pytest -q                              # 59 tests
 docker compose --profile test run --rm tests      # the same suite inside the image
 ```
+
+CI additionally runs the migrations against a real PostgreSQL and asserts that
+the resulting schema matches the models
+([`scripts/check_schema_drift.py`](scripts/check_schema_drift.py)) — the unit
+suite builds its schema from the models on SQLite, so it cannot see that class
+of drift by construction.
 
 ## Configuration
 
@@ -140,7 +148,7 @@ Every variable maps to a field in [`config.py`](bot/core/config.py); see
 | `POLL_INTERVAL_SECONDS` | `900` | Polling interval |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `ALERT_COOLDOWN_HOURS` | `24` | Minimum gap between repeat alerts for the same provider and status |
-| `PROVIDER_ERROR_WINDOW_SECONDS` | `300` | Sliding window for the provider error counter |
+| `PROVIDER_ERROR_WINDOW_SECONDS` | `3600` | Sliding window for the error counter; must be >= the poll interval |
 | `PROVIDER_ERROR_THRESHOLD` | `5` | Errors within the window before a provider is DOWN |
 | `HEADLESS_ENABLED` | `false` | Run the browser headless (both marketplaces refuse it) |
 | `BROWSER_CHANNEL` | `chrome` | Playwright channel; empty falls back to bundled Chromium |
@@ -182,17 +190,29 @@ bot/
   models/              # SQLAlchemy models
   utils/               # parsing / validation helpers
 migrations/            # Alembic
+scripts/               # check_schema_drift.py: migrations vs models, run in CI
 tests/                 # pytest (in-memory sqlite, no network)
 ```
 
 ## A note on scraping
 
-This is a personal-use project. It reads publicly visible product pages at a
-deliberately slow rate, identifies itself as an ordinary browser without
-attempting to defeat CAPTCHAs, uses no credentials, and backs off when a
-marketplace signals that it does not want the traffic. If you run it, keep it
-that way: respect each marketplace's Terms of Service and `robots.txt`, and do
-not lower the polling interval.
+This is a personal-use project, and it is worth being exact about what it does
+rather than claiming a clean conscience it has not earned.
+
+It reads publicly visible product pages at a deliberately slow rate: fifteen
+minutes between polls, thirty seconds minimum between two requests to the same
+marketplace, and a provider the health monitor marks DOWN is skipped for
+several cycles instead of being retried. It uses no credentials, does not solve
+or bypass CAPTCHAs, and gives up on a challenge rather than attacking it.
+
+It does not, however, present itself as an ordinary browser in good faith: it
+hides the `navigator.webdriver` flag and passes
+`--disable-blink-features=AutomationControlled`, whose only purpose is to keep
+an automated browser from being recognised as one, and on a challenge it retries
+once through the homepage. That is the honest description.
+
+If you run it, keep the polite parts polite: respect each marketplace's Terms of
+Service and `robots.txt`, and do not lower the intervals.
 
 ## License
 

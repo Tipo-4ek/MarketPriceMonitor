@@ -48,7 +48,15 @@ poetry run market-price-check <url>        # проверить, что пров
 poetry run pytest -q                       # тесты: sqlite в памяти, без сети
 poetry run ruff check . && poetry run ruff format --check .
 docker compose --profile test run --rm tests
+
+# миграции против настоящего Postgres + сверка схемы с моделями (это же гоняет CI)
+DATABASE_URL=postgresql+asyncpg://... python scripts/check_schema_drift.py
 ```
+
+Схема живёт в двух местах — в моделях и в миграции. Юнит-тесты строят её из
+моделей на SQLite и по построению не видят расхождения с миграцией, поэтому
+сверка идёт отдельным скриптом на настоящем Postgres. Правишь модель — правь
+миграцию и прогоняй его.
 
 Тесты не должны ходить в сеть и не должны зависеть от окружения разработчика —
 за это отвечает автоиспользуемая фикстура `isolated_settings` в
