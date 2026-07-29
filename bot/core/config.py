@@ -3,6 +3,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class ConfigError(RuntimeError):
+    """Raised when a setting the bot cannot run without is missing."""
+
+
 class Settings(BaseSettings):
     """Runtime settings. Field names map to upper-case environment variables."""
 
@@ -26,11 +30,19 @@ class Settings(BaseSettings):
     provider_error_window_seconds: int = 300
     provider_error_threshold: int = 5
 
-    # Scraping
-    headless_enabled: bool = True
-    proxy_file: str = ''
+    # Browser used for scraping. The defaults are the configuration that was
+    # measured to actually work: real Chrome, headed, with a persistent profile.
+    # Headless is left as a switch because it is useful for experiments, but
+    # both supported marketplaces reject it (see providers/browser.py).
+    headless_enabled: bool = False
+    browser_channel: str = 'chrome'
+    browser_profile_dir: str = '.browser-profile'
     proxy_url: str = ''
-    test_mode: bool = False
+
+    # Minimum gap between two requests to the same marketplace. Ozon escalates
+    # against bursts of automated traffic from one address, so this is a working
+    # requirement rather than good manners.
+    min_request_interval_seconds: float = 30.0
 
     @property
     def admin_ids(self) -> list[int]:
@@ -41,3 +53,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_runtime_settings() -> None:
+    """Fail fast, and legibly, on settings the bot cannot start without.
+
+    BOT_TOKEN is deliberately *not* a required pydantic field: making it one
+    would raise a ValidationError at import time, so merely importing the
+    package (in tests, or on the Alembic path) would need a token. Checking it
+    here keeps imports cheap and turns a stack trace into one actionable line.
+    """
+    if not settings.bot_token:
+        raise ConfigError('BOT_TOKEN is not set — copy .env.example to .env and fill in your @BotFather token')

@@ -1,12 +1,14 @@
-"""Bot startup script."""
+"""Bot entry point."""
 
 import asyncio
+import sys
 
 from aiogram import Bot, Dispatcher
 
-from bot.core.config import settings
+from bot.core.config import ConfigError, settings, validate_runtime_settings
 from bot.core.logging import get_logger, setup_logging
 from bot.core.providers import provider_registry
+from bot.core.providers.browser import browser_session
 from bot.core.scheduler import PriceScheduler
 from bot.handlers import setup_handlers
 from bot.models.base import init_db
@@ -14,42 +16,49 @@ from bot.models.base import init_db
 logger = get_logger(__name__)
 
 
-async def main():
-    """Main entry point."""
-    # Setup logging
+async def main() -> None:
+    """Start the bot and the price-polling scheduler, and shut both down cleanly."""
     setup_logging(settings.log_level)
-    logger.info('Starting MarketPriceMonitor Bot')
+    logger.info('Starting MarketPriceMonitor')
 
-    # Initialize database
     init_db(settings.database_url)
-    logger.info('Database initialized')
 
-    # Create bot and dispatcher
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
-
-    # Setup handlers
     setup_handlers(dp)
-    logger.info('Handlers registered')
 
-    # Create and start scheduler
     scheduler = PriceScheduler(bot, provider_registry)
-    scheduler_task = asyncio.create_task(scheduler.start())
+    scheduler_task = asyncio.create_task(scheduler.start(), name='price-scheduler')
 
     try:
-        # Start polling
-        logger.info('Starting polling')
         await dp.start_polling(bot, allowed_updates=['message'])
     finally:
-        # Cleanup
-        logger.info('Shutting down...')
+        logger.info('Shutting down')
         await scheduler.stop()
+        # stop() sets an event the loop waits on, so this returns promptly
+        # instead of blocking until the current poll interval elapses.
         await scheduler_task
+        # The browser is a long-lived child process; leaking it would leave a
+        # Chrome window behind on every restart.
+        await browser_session.close()
         await bot.session.close()
 
 
-if __name__ == '__main__':
+def run() -> None:
+    """Console-script entry point (`market-price-monitor`)."""
+    try:
+        validate_runtime_settings()
+    except ConfigError as exc:
+        # A missing token is a configuration mistake, not a crash: say what to
+        # do in one line rather than printing an aiogram traceback.
+        print(f'Configuration error: {exc}', file=sys.stderr)  # noqa: T201
+        raise SystemExit(2) from None
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info('Bot stopped by user')
+
+
+if __name__ == '__main__':
+    run()
