@@ -1,7 +1,9 @@
 .env
-proxies.txt
 bot.log
 *.db
+
+# Browser profile: cookies and anti-bot state, per machine.
+.browser-profile/
 *.log
 __pycache__/
 *.py[cod]
@@ -35,5 +37,7 @@ ENV/
 *.swo
 *~
 .DS_Store
-poetry.lock
+
+# poetry.lock is deliberately committed: this is an application, not a library,
+# so builds must be reproducible.
 
