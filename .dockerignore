@@ -14,7 +14,7 @@ htmlcov
 .coverage
 
 .env
-proxies.txt
+.browser-profile/
 *.db
 *.log
 

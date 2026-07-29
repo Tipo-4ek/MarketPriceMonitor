@@ -39,7 +39,9 @@ RUN playwright install --with-deps chromium && \
 
 COPY bot ./bot
 COPY migrations ./migrations
-COPY alembic.ini pyproject.toml ./
+# poetry.lock travels with pyproject.toml so the dev stage below installs the
+# same pinned versions as the runtime stage rather than re-resolving them.
+COPY alembic.ini pyproject.toml poetry.lock README.md ./
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh && \

@@ -49,7 +49,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
+    # on-failure, not unless-stopped: starting without a BOT_TOKEN is a
+    # configuration mistake that exits immediately, and restarting it forever
+    # would bury the one line saying what to fix under a scrolling loop.
+    restart: on-failure:3
 
   tests:
     build:

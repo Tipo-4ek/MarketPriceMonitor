@@ -39,8 +39,12 @@ async def cmd_monitor(message: Message, command: CommandObject):
         user = await TrackingService.get_or_create_user(session, message.from_user.id)
 
         if not product_id or not threshold:
+            # Name the argument that was actually wrong: telling someone their
+            # threshold is invalid when they mistyped the product id sends them
+            # looking in the wrong place.
+            key = 'invalid_product_id' if not product_id else 'invalid_threshold'
             await session.commit()
-            await message.answer(get_text(user.locale, 'invalid_threshold'))
+            await message.answer(get_text(user.locale, key))
             return
 
         tracking = await TrackingService.update_tracking_threshold(session, user, product_id, threshold)
