@@ -1,45 +1,67 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+
+# --- build stage: resolve and install the locked dependencies ----------------
+FROM python:3.14-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_VERSION=2.4.1 \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=1
+
+RUN pip install "poetry==${POETRY_VERSION}"
 
 WORKDIR /app
 
-# System deps: Postgres client for the entrypoint wait-loop. Chromium and its
-# libraries are installed by `playwright install --with-deps` further down.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client && \
+# Only the dependency manifests, so this layer is cached until they change.
+# poetry.lock is committed, so the build is reproducible.
+COPY pyproject.toml poetry.lock README.md ./
+
+RUN poetry install --only main --no-root
+
+# --- runtime stage ----------------------------------------------------------
+FROM python:3.14-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:${PATH}" \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+WORKDIR /app
+
+# The venv lives at the same path as in the builder, so no relocation is needed.
+COPY --from=builder /app/.venv /app/.venv
+
+# Chromium plus the system libraries it needs. Done as root, before dropping
+# privileges; the browsers directory is world-readable afterwards.
+RUN playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install Poetry
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir poetry==1.8.3
+COPY bot ./bot
+COPY migrations ./migrations
+COPY alembic.ini pyproject.toml ./
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Copy dependency files
-COPY pyproject.toml poetry.lock* ./
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    useradd --create-home --uid 10001 app && \
+    chown -R app:app /app
 
-# Configure Poetry
-RUN poetry config virtualenvs.create false
+USER app
 
-# Install dependencies
-RUN poetry install --no-root --no-interaction --no-ansi
-
-# Install Playwright browsers with system dependencies
-RUN playwright install --with-deps chromium
-
-# Copy application code
-COPY . .
-
-# Create entrypoint script
-RUN echo '#!/bin/bash\n\
-set -e\n\
-echo "Waiting for database..."\n\
-while ! pg_isready -h db -U postgres; do\n\
-  sleep 1\n\
-done\n\
-echo "Running migrations..."\n\
-alembic upgrade head\n\
-echo "Starting bot..."\n\
-exec "$@"\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["python", "-m", "bot.core.startup"]
 
+# --- dev stage: runtime plus the test toolchain -----------------------------
+# Used by `docker compose --profile test run --rm tests`. Kept as a separate
+# target so the shipped image carries no test dependencies.
+FROM runtime AS dev
+
+USER root
+RUN pip install --no-cache-dir "poetry==2.4.1" && \
+    POETRY_VIRTUALENVS_IN_PROJECT=1 poetry install --no-root --no-interaction
+COPY tests ./tests
+RUN chown -R app:app /app
+USER app
+
+ENTRYPOINT []
+CMD ["pytest", "-v"]

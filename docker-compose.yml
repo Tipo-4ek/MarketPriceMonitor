@@ -1,10 +1,15 @@
-# Note: marketplace anti-bot systems often flag requests coming from datacenter
-# IPs / containers. For real tracking, run the bot on a residential/desktop host
-# (see README). Docker is fine for development, tests, and trying the project.
+# What this stack is and is not, measured rather than assumed:
+#
+# The bot runs here, migrations run here, the tests run here. Scraping does not.
+# Both supported marketplaces refuse headless browsers, and the image has no
+# real Chrome to fall back on, so providers will report themselves blocked and
+# the health monitor will mark them DOWN — which is the correct behaviour, not a
+# bug. For actual price tracking, run the bot on a desktop host with Chrome
+# installed (see README, "Running").
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: market_price_monitor_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -15,39 +20,48 @@ services:
     # ports:
     #   - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Postgres 18 images want a single mount at /var/lib/postgresql and place
+      # the cluster in a version-specific subdirectory; mounting the old
+      # .../data path makes the container refuse to start.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-price_tracker}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   bot:
-    build: .
+    build:
+      context: .
+      target: runtime
     container_name: market_price_monitor_bot
     env_file:
-      - .env
+      # Optional so `docker compose config` works on a fresh clone; the bot
+      # still refuses to start without BOT_TOKEN.
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-price_tracker}
+      # No real Chrome in the image, and no display: use the bundled Chromium
+      # headless. See the note at the top about what that means for scraping.
+      BROWSER_CHANNEL: ''
+      HEADLESS_ENABLED: 'true'
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-    volumes:
-      - ./bot:/app/bot
-      - ./migrations:/app/migrations
 
   tests:
-    build: .
+    build:
+      context: .
+      target: dev
     container_name: market_price_monitor_tests
     # Tests use an in-memory SQLite DB, so no database service is needed.
-    entrypoint: []
-    command: ["pytest", "-v", "tests/"]
     profiles:
       - test
-    volumes:
-      - ./bot:/app/bot
-      - ./tests:/app/tests
 
 volumes:
+  # Renamed with the mount-point change so an old PG16 volume is left alone
+  # rather than silently reinterpreted by a newer server.
   postgres_data:
+    name: market_price_monitor_pgdata_18

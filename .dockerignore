@@ -1,0 +1,26 @@
+# Keep the build context small and free of anything host- or secret-specific.
+.git
+.github
+.venv
+venv
+ENV
+
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+
+.env
+proxies.txt
+*.db
+*.log
+
+.idea
+.vscode
+.DS_Store
+
+# README.md is NOT ignored: pyproject.toml declares it as the project readme,
+# so poetry needs it present to install the project metadata.
