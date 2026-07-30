@@ -137,7 +137,7 @@ the migrations and the tests — not the scraping.
 
 ## Tests
 
-83 tests against an in-memory SQLite database. None touch the network.
+92 tests against an in-memory SQLite database. None touch the network.
 
 ```bash
 poetry run pytest -q
