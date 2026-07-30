@@ -99,13 +99,29 @@ def json_ld_blocks(html: str) -> list[dict]:
     return blocks
 
 
+def _is_product(block: dict) -> bool:
+    """schema.org @type may be a string or a list, and may be sub-typed."""
+    raw = block.get('@type')
+    types = raw if isinstance(raw, list) else [raw]
+    return any(isinstance(t, str) and 'product' in t.lower() for t in types)
+
+
 def json_ld(material: PageMaterial) -> PriceCandidate:
-    """schema.org Product/offers — the cleanest source when a shop publishes it."""
+    """schema.org Product/offers — the cleanest source when a shop publishes it.
+
+    Only Product blocks are read for the name. Shops emit an Organization or
+    WebSite block on the same page, and taking the first ``name`` on offer titles
+    every product after the shop itself — "Регард", "Читай-город" — which is how
+    this was found.
+    """
     title = None
     price = None
     currency = None
 
     for block in json_ld_blocks(material.html):
+        if not _is_product(block):
+            continue
+
         if block.get('name') and not title:
             title = str(block['name']).strip()
 
