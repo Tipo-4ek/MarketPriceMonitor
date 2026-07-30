@@ -4,7 +4,9 @@ import asyncio
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 
+from bot.core.commands import register_bot_commands
 from bot.core.config import ConfigError, settings, validate_runtime_settings
 from bot.core.logging import get_logger, setup_logging
 from bot.core.providers import provider_registry
@@ -24,8 +26,15 @@ async def main() -> None:
     init_db(settings.database_url)
 
     bot = Bot(token=settings.bot_token)
-    dp = Dispatcher()
+    # In-memory FSM storage: the only state kept is 'which argument am I
+    # waiting for', which is worth nothing after a restart. Anything durable
+    # lives in the database.
+    dp = Dispatcher(storage=MemoryStorage())
     setup_handlers(dp)
+
+    # Publish the command menu so clients can show it instead of the user having
+    # to already know what to type.
+    await register_bot_commands(bot)
 
     scheduler = PriceScheduler(bot, provider_registry)
     scheduler_task = asyncio.create_task(scheduler.start(), name='price-scheduler')
