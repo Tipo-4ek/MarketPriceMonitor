@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column(
             'provider',
-            sa.Enum('OZON', 'WILDBERRIES', name='providerenum'),
+            sa.Enum('WILDBERRIES', name='providerenum'),
             nullable=False,
         ),
         sa.Column('url', sa.String(length=1024), nullable=False),

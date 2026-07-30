@@ -3,7 +3,7 @@
 The standing question for any scraper is "does it still work?". This answers it
 in one command, without a bot token, a database or Telegram:
 
-    poetry run market-price-check https://www.ozon.ru/product/...
+    poetry run market-price-check https://www.wildberries.ru/catalog/219279898/detail.aspx
 
 Exit code 0 means a price was read; 1 means the marketplace refused or the page
 no longer parses — which is exactly what the scheduler would have recorded as a

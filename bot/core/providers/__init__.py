@@ -1,7 +1,6 @@
 """Provider registry: routes an incoming URL to the provider that claims it."""
 
 from bot.core.providers.base import Provider, UnsupportedURLError
-from bot.core.providers.ozon import OzonProvider
 from bot.core.providers.wildberries import WildberriesProvider
 from bot.models.enums import ProviderEnum
 
@@ -11,7 +10,6 @@ class ProviderRegistry:
 
     def __init__(self, providers: dict[ProviderEnum, Provider] | None = None):
         self.providers: dict[ProviderEnum, Provider] = providers or {
-            ProviderEnum.OZON: OzonProvider(),
             ProviderEnum.WILDBERRIES: WildberriesProvider(),
         }
 

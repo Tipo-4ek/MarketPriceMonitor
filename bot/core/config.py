@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     bot_token: str = ''
     admin_tg_ids: str = ''
 
-    # Database (async SQLAlchemy URL)
-    database_url: str = 'postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker'
+    # Database (async SQLAlchemy URL). SQLite by default so a fresh clone runs
+    # with no infrastructure; docker-compose overrides it with Postgres.
+    database_url: str = 'sqlite+aiosqlite:///./price_tracker.db'
 
     # Behaviour
     default_locale: str = 'ru'
@@ -44,9 +45,9 @@ class Settings(BaseSettings):
     browser_profile_dir: str = '.browser-profile'
     proxy_url: str = ''
 
-    # Minimum gap between two requests to the same marketplace. Ozon escalates
-    # against bursts of automated traffic from one address, so this is a working
-    # requirement rather than good manners.
+    # Minimum gap between two requests to the same marketplace. Marketplaces
+    # escalate against bursts from one address (see docs/marketplace-access.md),
+    # so this is a working requirement rather than good manners.
     min_request_interval_seconds: float = 30.0
 
     @property

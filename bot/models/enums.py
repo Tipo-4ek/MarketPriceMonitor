@@ -11,7 +11,6 @@ class ProviderEnum(enum.StrEnum):
     marketplace the bot claims to support and then fails on.
     """
 
-    OZON = 'ozon'
     WILDBERRIES = 'wildberries'
 
 
