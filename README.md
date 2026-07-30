@@ -17,7 +17,10 @@ measured against live anti-bot systems, and an honest record of what works.
 ## Reading a price without knowing the site
 
 The core is a chain of readers that know web conventions rather than shops
-([`generic_parsers.py`](bot/core/providers/generic_parsers.py)):
+([`generic_parsers.py`](bot/core/providers/generic_parsers.py)). Three of them read
+semantics the shop **declared** for search engines — which is why this generalises
+at all: shops publish schema.org so Google can show a price, and that markup is
+there whether or not anyone wrote a provider for them.
 
 - **schema.org JSON-LD** — `Product` / `offers.price`, including `@graph` nesting.
 - **schema.org microdata** — `itemprop="price"`.
@@ -34,9 +37,32 @@ is the point of having five.
 A [`StrategyChain`](bot/core/providers/strategies.py) runs them until one returns a
 plausible price, then **remembers which one worked and tries it first next time**.
 One page fetch feeds every reader, so trying more ways costs no extra requests to
-the shop. When the shape is ambiguous the chain returns nothing rather than a
-guess: a price out by a factor of two fires a false alert to everyone tracking
-that product, which is worse than a missed poll.
+the shop.
+
+Every figure is range-checked, and unit rates like "218 ₽ за 100 гр" are dropped.
+Where a rendered price element shows two figures, `rendered_text` returns nothing
+rather than guess: there is no telling a discounted-plus-regular pair from a
+regular-plus-struck-through one, and choosing wrong stores a price out by a large
+factor and fires a false alert to everyone tracking that product.
+
+### What this does not do yet
+
+Being exact, because the difference matters:
+
+- **No cross-validation between readers.** The chain accepts the first usable
+  answer; it does not check that a second reader agrees.
+- **`microdata` is not scoped to the main product.** It takes the first
+  `itemprop="price"` on the page without verifying the enclosing `itemscope` is a
+  `Product`, so a "related products" block could supply the number.
+- **No generic DOM heuristic.** `rendered_text` reads an element a provider
+  selected; on a site with no provider it gets nothing. Finding the price element
+  on an unknown page — weighing candidates by proximity to the heading and the buy
+  button, rejecting struck-through text — is the obvious next step and is not
+  written.
+
+So today this reads prices on any shop that marks them up for search engines,
+which is most of them; it is not yet a detector that works on a page with no
+markup at all.
 
 ## Architecture
 
