@@ -15,7 +15,7 @@ from bot.models import PriceHistory, Product, Tracking, User, base
 from bot.models.base import Base
 from bot.models.enums import ProviderEnum, ProviderStatus
 
-URL = 'https://www.ozon.ru/product/thing-1/'
+URL = 'https://www.wildberries.ru/catalog/219279898/detail.aspx'
 
 
 class FakeBot:
@@ -39,7 +39,7 @@ class FakeProvider(Provider):
 
     @property
     def provider_type(self):
-        return ProviderEnum.OZON
+        return ProviderEnum.WILDBERRIES
 
     def supports(self, url):
         return True
@@ -74,7 +74,9 @@ async def wired_db(monkeypatch):
 
     async with maker() as session:
         user = User(tg_user_id=42, locale='ru')
-        product = Product(provider=ProviderEnum.OZON, url=URL, title='Thing', currency='RUB', last_price=Decimal('100'))
+        product = Product(
+            provider=ProviderEnum.WILDBERRIES, url=URL, title='Thing', currency='RUB', last_price=Decimal('100')
+        )
         session.add_all([user, product])
         await session.flush()
         session.add(Tracking(user_id=user.id, product_id=product.id))
@@ -163,7 +165,7 @@ async def test_a_blocked_provider_is_recorded_as_an_error(wired_db, clean_health
 
     assert provider.calls == 1
     assert bot.sent == []
-    assert len(clean_health.errors[ProviderEnum.OZON]) == 1
+    assert len(clean_health.errors[ProviderEnum.WILDBERRIES]) == 1
 
 
 async def test_a_down_provider_is_skipped_for_several_cycles(wired_db, clean_health, isolated_settings):
@@ -174,7 +176,7 @@ async def test_a_down_provider_is_skipped_for_several_cycles(wired_db, clean_hea
     # Drive it to DOWN.
     for _ in range(isolated_settings.provider_error_threshold):
         await scheduler._check_prices()
-    assert clean_health.get_status(ProviderEnum.OZON) is ProviderStatus.DOWN
+    assert clean_health.get_status(ProviderEnum.WILDBERRIES) is ProviderStatus.DOWN
 
     calls_when_down = provider.calls
 
@@ -195,7 +197,7 @@ async def test_one_failing_product_does_not_abort_the_cycle(wired_db, clean_heal
     async with maker() as session:
         user = (await session.execute(select(User))).scalars().first()
         second = Product(
-            provider=ProviderEnum.OZON,
+            provider=ProviderEnum.WILDBERRIES,
             url=URL + '2',
             title='Other',
             currency='RUB',

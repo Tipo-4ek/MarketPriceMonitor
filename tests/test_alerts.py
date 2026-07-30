@@ -10,7 +10,7 @@ from bot.models.enums import ProviderEnum, ProviderStatus
 def test_alert_cooldown():
     """Test alert cooldown mechanism."""
     alert_manager = AlertManager()
-    provider = ProviderEnum.OZON
+    provider = ProviderEnum.WILDBERRIES
     status = ProviderStatus.DOWN
 
     # First alert should be sent
@@ -26,7 +26,7 @@ def test_alert_cooldown():
 def test_alert_different_status():
     """Test alerts for different statuses."""
     alert_manager = AlertManager()
-    provider = ProviderEnum.OZON
+    provider = ProviderEnum.WILDBERRIES
 
     # Send DOWN alert
     alert_manager.record_alert(provider, ProviderStatus.DOWN)
@@ -38,7 +38,7 @@ def test_alert_different_status():
 def test_alert_enable_disable():
     """Test enabling and disabling alerts."""
     alert_manager = AlertManager()
-    provider = ProviderEnum.OZON
+    provider = ProviderEnum.WILDBERRIES
     status = ProviderStatus.DOWN
 
     # Disable alerts
@@ -53,7 +53,7 @@ def test_alert_enable_disable():
 def test_alert_reset():
     """Test resetting alert history."""
     alert_manager = AlertManager()
-    provider = ProviderEnum.OZON
+    provider = ProviderEnum.WILDBERRIES
     status = ProviderStatus.DOWN
 
     # Record alert
@@ -68,7 +68,7 @@ def test_alert_reset():
 def test_alert_cooldown_expired(isolated_settings):
     """An alert older than the cooldown is allowed through again."""
     alert_manager = AlertManager()
-    provider = ProviderEnum.OZON
+    provider = ProviderEnum.WILDBERRIES
     status = ProviderStatus.DOWN
 
     # Just inside the cooldown: still suppressed.

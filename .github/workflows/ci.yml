@@ -63,7 +63,9 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_PASSWORD: postgres
+          # A throwaway service container on a private network: trust auth
+          # means no password has to exist, let alone be committed.
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: price_tracker
         ports:
           - 5432:5432
@@ -91,7 +93,7 @@ jobs:
 
       - name: Migrate and compare against the models
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker
+          DATABASE_URL: postgresql+asyncpg://postgres@localhost:5432/price_tracker
         run: poetry run python scripts/check_schema_drift.py
 
   docker:

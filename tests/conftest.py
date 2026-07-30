@@ -90,8 +90,8 @@ async def sample_product(db_session: AsyncSession):
     from bot.models.enums import ProviderEnum
 
     product = Product(
-        provider=ProviderEnum.OZON,
-        url='https://www.ozon.ru/product/-123456/',
+        provider=ProviderEnum.WILDBERRIES,
+        url='https://www.wildberries.ru/catalog/219279898/detail.aspx',
         title='Test Product',
         currency='RUB',
         last_price=Decimal('1000.00'),

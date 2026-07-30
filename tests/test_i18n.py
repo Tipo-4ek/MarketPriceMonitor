@@ -9,17 +9,17 @@ from bot.models import User
 
 
 def test_get_text_russian():
-    """Test getting Russian text."""
+    """The Russian welcome names the supported marketplace."""
     text = get_text('ru', 'welcome')
-    assert '👋' in text
-    assert 'Добро пожаловать' in text
+    assert 'Wildberries' in text
+    assert 'ценами' in text
 
 
 def test_get_text_english():
-    """Test getting English text."""
+    """The English welcome names the supported marketplace."""
     text = get_text('en', 'welcome')
-    assert '👋' in text
-    assert 'Welcome' in text
+    assert 'Wildberries' in text
+    assert 'prices' in text
 
 
 def test_get_text_with_parameters():
@@ -31,9 +31,8 @@ def test_get_text_with_parameters():
 
 
 def test_get_text_fallback():
-    """Test fallback to Russian for unsupported locale."""
-    text = get_text('fr', 'welcome')
-    assert 'Добро пожаловать' in text
+    """An unsupported locale falls back to Russian rather than failing."""
+    assert get_text('fr', 'welcome') == get_text('ru', 'welcome')
 
 
 @pytest.mark.asyncio
