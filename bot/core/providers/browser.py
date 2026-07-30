@@ -1,14 +1,16 @@
 """One long-lived browser session, shared by every provider.
 
-Why it looks like this, measured against ozon.ru and wildberries.ru in 2026:
+Why it looks like this, measured against live marketplaces in 2026
+(docs/marketplace-access.md has the full table):
 
 * **Real Chrome, not Playwright's bundled Chromium.** Bundled Chromium is
   refused outright — the challenge page never resolves, headless or headed.
   Launching the installed Chrome (``channel='chrome'``) passes it in seconds.
 * **A persistent profile.** The challenge hands out cookies; keeping a profile
   on disk means the next poll starts already trusted instead of re-solving.
-* **Headed by default.** Both marketplaces reject headless, including headless
-  real Chrome. This is why the shipped container cannot scrape (see README).
+* **Headed by default.** The marketplaces tested reject headless, including
+  headless real Chrome. A server with no display can still run this under a
+  virtual framebuffer — `xvfb-run` — which is how it is deployed.
 * **No User-Agent override.** Chrome's own UA matches its engine version and
   client hints; pinning a hand-written UA string creates exactly the
   inconsistency that anti-bot systems look for.
@@ -56,6 +58,7 @@ class BrowserSession:
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
+        self._page: Page | None = None
 
     async def _ensure_context(self) -> BrowserContext:
         if self._context is not None:
@@ -99,19 +102,28 @@ class BrowserSession:
 
     @contextlib.asynccontextmanager
     async def page(self) -> AsyncIterator[Page]:
-        """Borrow a fresh page on the shared context, one caller at a time."""
+        """Borrow the shared page, one caller at a time.
+
+        One page is reused rather than opened and closed per fetch. Opening a tab
+        raises and focuses the browser window on macOS, so a poll loop with a
+        headed browser would steal focus on every cycle — which is intolerable on
+        the desktop this is designed to run on. Reuse also skips the per-fetch
+        page setup, and the lock already guarantees one caller at a time.
+        """
         async with self._lock:
             context = await self._ensure_context()
-            page = await context.new_page()
-            try:
-                yield page
-            finally:
-                with contextlib.suppress(Exception):
-                    await page.close()
+
+            if self._page is None or self._page.is_closed():
+                # launch_persistent_context opens with a blank page; adopt it
+                # instead of adding a second one.
+                self._page = context.pages[0] if context.pages else await context.new_page()
+
+            yield self._page
 
     async def close(self) -> None:
         """Shut the browser down. Safe to call when it was never started."""
         async with self._lock:
+            self._page = None
             if self._context is not None:
                 with contextlib.suppress(Exception):
                     await self._context.close()
