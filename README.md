@@ -1,279 +1,180 @@
 # MarketPriceMonitor
 
-A Telegram bot that tracks product prices: send it a product link, it polls the
-price on a schedule and messages you when the price moves past your threshold.
+MarketPriceMonitor читает цену со страницы товара по общей для сайтов разметке —
+schema.org, Open Graph, встроенный в страницу JSON, — а не парсером под конкретный
+магазин. Из провайдеров собран Wildberries: он приносит транспорт и свои ридеры
+поверх общих. За флагом `GENERIC_PROVIDER_ENABLED` тот же движок читает цену на любом
+сайте с разметкой; по умолчанию выключено, потому что наводит браузер на произвольные
+ссылки (см. [Безопасность](#безопасность)). Бот следит за ценой по расписанию и пишет
+в телеграм, когда она уходит за заданный порог.
 
 ![CI](https://github.com/Tipo-4ek/MarketPriceMonitor/actions/workflows/ci.yml/badge.svg)
 
-**Stack:** Python 3.14 · aiogram 3 · SQLAlchemy 2 (async) · PostgreSQL · Alembic
-· Playwright · Poetry · pytest · ruff
+**Стек:** Python 3.13–3.14 · aiogram 3 · SQLAlchemy 2 (async) · PostgreSQL ·
+Alembic · Playwright · Poetry · pytest · ruff · mypy
 
-The hard part of price tracking is not the schedule or the database. It is that
-every shop hides its price somewhere else, moves it without warning, and — for the
-large marketplaces — decides whether to serve you a page at all. This repository is
-built around that problem: site-agnostic price readers tried in turn, a transport
-measured against live anti-bot systems, and an honest record of what works.
+Живой инстанс — [@tipo_price_aggregator_bot](https://t.me/tipo_price_aggregator_bot).
 
-## Reading a price without knowing the site
+## Что делает
 
-The core is a chain of readers that know web conventions rather than shops
-([`generic_parsers.py`](bot/core/providers/generic_parsers.py)). Three of them read
-semantics the shop **declared** for search engines — which is why this generalises
-at all: shops publish schema.org so Google can show a price, and that markup is
-there whether or not anyone wrote a provider for them.
+Ловить скидку руками — рутина: цена скачет, а заходить и сверять лень. Бот держит
+список отслеживаемых товаров и присылает сообщение, когда цена ушла вниз (или
+вверх) больше чем на заданный процент. Порог свой на каждый товар, язык интерфейса
+русский или английский. Чтобы начать следить за товаром, достаточно прислать боту
+ссылку — команду можно не писать.
 
-- **schema.org JSON-LD** — `Product` / `offers.price`, including `@graph` nesting.
-- **schema.org microdata** — `itemprop="price"`.
-- **Open Graph / product meta** — `product:price:amount`.
-- **Hydration state** — the JSON a front end feeds its own widgets from, found by
-  searching any nesting for price-shaped keys rather than a fixed path, because
-  that shape changes freely between deploys.
-- **Rendered text** — money in the price element, with unit rates like
-  "218 ₽ за 100 гр" discarded.
+## Что внутри интересного
 
-Each breaks on a different kind of redesign and none breaks on all of them, which
-is the point of having five.
+Расписание и база тут — простая часть. Возни требует другое: каждый магазин прячет
+цену по-своему и переставляет разметку без предупреждения. Поэтому цена читается не
+парсером под конкретный сайт, а цепочкой ридеров, которые знают общие для магазинов
+веб-конвенции:
 
-A [`StrategyChain`](bot/core/providers/strategies.py) runs them until one returns a
-plausible price, then **remembers which one worked and tries it first next time**.
-One page fetch feeds every reader, so trying more ways costs no extra requests to
-the shop.
+- schema.org — JSON-LD и микроразметка (`Product` / `offers.price`);
+- Open Graph и product-теги;
+- внутренний JSON страницы, из которого цену рисует уже сам фронтенд в браузере
+  (ищется по форме ключей, а не по фиксированному пути: путь между релизами магазина
+  плывёт, форма — нет);
+- отрисованный ценник, в последнюю очередь.
 
-Every figure is range-checked, and unit rates like "218 ₽ за 100 гр" are dropped.
-Where a rendered price element shows two figures, `rendered_text` returns nothing
-rather than guess: there is no telling a discounted-plus-regular pair from a
-regular-plus-struck-through one, and choosing wrong stores a price out by a large
-factor and fires a false alert to everyone tracking that product.
+Цепочка идёт по ридерам, пока один не вернёт правдоподобное число, и запоминает,
+какой сработал, чтобы в следующий раз начать с него. Страница скачивается один раз
+и кормит все ридеры сразу, так что попробовать ещё способ ничего не стоит. Каждый
+ридер ломается на своём типе редизайна, и ни один не ломается на всех — ради этого
+их и держат несколько.
 
-### What this does not do yet
+Какой транспорт получает страницу, я выяснял замерами с двух сетей — домашней и
+датацентровой; таблица в [docs/marketplace-access.md](docs/marketplace-access.md).
+Страницу отдают только живому браузеру: TLS-имперсонация через `curl_cffi` не прошла
+ни разу — 18 попыток, 18 отказов. Команда `market-price-check` тянет один URL и
+печатает цену без бота, базы и телеграма; ей я проверяю, что провайдер ещё жив, и
+смотрю в логе, какой ридер сработал.
 
-Being exact, because the difference matters:
+Здоровье провайдера ведёт машина состояний OK → DEGRADED → DOWN поверх скользящего
+окна ошибок. Провайдер в DOWN на несколько циклов выпадает из опроса: слать запросы
+туда, где уже отказывают, смысла нет и только приближает устойчивый бан. На каждый
+переход статуса админу уходит одно сообщение, с дедупликацией и кулдауном.
 
-- **No cross-validation between readers.** The chain accepts the first usable
-  answer; it does not check that a second reader agrees.
-- **`microdata` is not scoped to the main product.** It takes the first
-  `itemprop="price"` on the page without verifying the enclosing `itemscope` is a
-  `Product`, so a "related products" block could supply the number.
-- **No generic DOM heuristic.** `rendered_text` reads an element a provider
-  selected; on a site with no provider it gets nothing. Finding the price element
-  on an unknown page — weighing candidates by proximity to the heading and the buy
-  button, rejecting struck-through text — is the obvious next step and is not
-  written.
+Ошибки провайдера типизированы: «ссылка не поддерживается», «магазин не отдал
+страницу» и «страница поменялась» — это три разные ситуации с разными сообщениями
+пользователю, и на здоровье провайдера влияет только вторая.
 
-So today this reads prices on any shop that marks them up for search engines,
-which is most of them; it is not yet a detector that works on a page with no
-markup at all.
+## Статус
 
-## Architecture
+Рабочий, гоняю на себе, на десктопе с установленным Chrome.
 
-- **Provider abstraction + URL-dispatch registry.** A provider implements
-  `supports` / `normalize` / `fetch_product` plus a `provider_type`
-  ([`base.py`](bot/core/providers/base.py)); the registry routes an incoming URL to
-  whichever provider claims it. A provider supplies the transport and any
-  site-specific reader; the generic readers it gets for free.
-- **One shared browser session.** Providers borrow a single long-lived Chrome page
-  ([`browser.py`](bot/core/providers/browser.py)) rather than launching a browser
-  per product.
-- **Health-checked polling scheduler.** [`scheduler.py`](bot/core/scheduler.py)
-  polls every tracked product on an interval. A sliding error window per provider
-  ([`health.py`](bot/core/providers/health.py)) drives an OK → DEGRADED → DOWN state
-  machine; admins get de-duplicated, cooldown-gated alerts
-  ([`alerts.py`](bot/core/alerts.py)) on each transition, recovery included; and a
-  provider marked DOWN is skipped for several cycles instead of hammered.
-- **A typed error taxonomy.** `UnsupportedURLError`, `ProviderBlockedError` and
-  `PriceNotFoundError` are distinct, because "this link is not supported", "the shop
-  is refusing us" and "the page changed shape" are three different problems that
-  deserve three different messages — and only some of them say anything about the
-  shop's health.
-- **Per-host throttle** ([`throttle.py`](bot/core/providers/throttle.py)) — a minimum
-  gap between requests to the same site. Measured necessity, not manners.
-- **Typed SQLAlchemy 2 models + Alembic**, timezone-aware throughout, i18n (ru/en),
-  admin ACL middleware, and structured JSON logs to stdout.
+- **Провайдер один — Wildberries.** Ozon намеренно не отгружаю: он встречает
+  капчей, а её обход — это уже не подбор рабочей конфигурации, а обход защиты.
+  Замеры по нему остались в docs/, код — нет.
+- **Скрейпинг работает ровно в одной конфигурации, проверенной на живых магазинах:**
+  настоящий Chrome (`channel=chrome`), с окном, с постоянным профилем. Встроенный в
+  Playwright Chromium и headless магазин отбивает. Сервер без монитора заводится под
+  виртуальным фреймбуфером (`xvfb-run`). Профиль в `.browser-profile/` нужно
+  сохранять между перезапусками: в нём то доверие, которое анти-бот однажды выдал.
+- **В Docker собирается бот, миграции и тесты, но не скрейпинг:** в образе нет ни
+  настоящего Chrome, ни дисплея.
 
-## What actually works
-
-Everything in [docs/marketplace-access.md](docs/marketplace-access.md) was run, from
-two networks — a residential connection and a datacenter VM on an unrelated subnet.
-The short version:
-
-- **A real browser is the only transport that gets a page.** TLS impersonation is
-  not enough: `curl_cffi` across six browser fingerprints and three endpoints was
-  refused eighteen times out of eighteen.
-- **The browser profile is the asset, not the IP.** A cold profile is refused even
-  from an address that has never contacted the site; the same profile, once through
-  the transparent challenge, is served normally. So `BROWSER_PROFILE_DIR` must
-  survive restarts, and the first fetch after a fresh deploy is slow.
-- **Headless is refused** — including headless real Chrome. A server with no display
-  still works under a virtual framebuffer (`xvfb-run`), which is how it is deployed.
-- **Shipped provider: Wildberries.** Ozon is deliberately **not** shipped: it serves
-  a captcha and a structured block record, and getting past that is circumventing an
-  access control rather than finding a compatible configuration. The measurements are
-  kept because they are the useful part; code that always fails is not.
-
-## Is it still working?
-
-The standing question for anything that scrapes. One command answers it, with no bot
-token, database or Telegram involved:
-
-```bash
-poetry run market-price-check https://www.wildberries.ru/catalog/219279898/detail.aspx
-# OK    ETNA COFFEE Кофе в зернах 250 гр, Суль-де-Минас
-#       661 RUB  (wildberries)
-#       https://www.wildberries.ru/catalog/219279898/detail.aspx
-```
-
-Exit code 0 means a price was read; 1 means the shop refused or the page no longer
-parses — exactly what the scheduler would record as a provider error. The log names
-the strategy that won, so a silent migration from one reader to another is visible
-rather than mysterious.
-
-## Running
-
-### On a desktop with Chrome
+## Быстрый старт
 
 ```bash
 poetry install
-cp .env.example .env         # fill in BOT_TOKEN, ADMIN_TG_IDS, POSTGRES_PASSWORD
+cp .env.example .env          # заполнить BOT_TOKEN, ADMIN_TG_IDS
 poetry run alembic upgrade head
-poetry run market-price-monitor
+poetry run market-price-monitor          # бот (откроет окно Chrome)
+
+# Проверить один URL, без бота, базы и Telegram:
+poetry run market-price-check https://www.wildberries.ru/catalog/219279898/detail.aspx
+# OK    ETNA COFFEE Кофе в зернах 250 гр, Суль-де-Минас
+#       661 RUB  (wildberries)
 ```
 
-A Chrome window opens and stays open — that is the shared session. The first request
-to a shop may sit through a challenge; after that the profile in `.browser-profile/`
-is trusted and polls are fast.
+Сервер без дисплея: `sudo apt-get install -y xvfb google-chrome-stable`, затем
+`xvfb-run -a --server-args="-screen 0 1440x900x24" poetry run market-price-monitor`.
 
-### On a headless server
+Через Docker (Postgres, миграции, тесты; без скрейпинга):
+`cp .env.example .env && docker compose up --build`.
 
-Ubuntu 24.04, verified end to end:
+## Команды
 
-```bash
-sudo apt-get install -y xvfb google-chrome-stable
-xvfb-run -a --server-args="-screen 0 1440x900x24" poetry run market-price-monitor
-```
+Аргумент можно не писать: вызванная из меню команда приходит без него, и тогда бот
+сам спрашивает, чего не хватает, и где может — предлагает кнопки вместо ввода id.
+Ссылку он принимает и вовсе без команды.
 
-### With Docker — database, migrations, tests
+**Пользователю:** `/start`, `/add [url]`, `/list`, `/remove [id]`,
+`/monitor [set <id> <delta>]`, `/lang [ru|en]`, `/cancel`, `/help`
+**Админу:** `/provider_status`, `/alerts_on`, `/alerts_off`, `/health_reset`
 
-```bash
-cp .env.example .env    # BOT_TOKEN and POSTGRES_PASSWORD are required
-docker compose up --build
-```
+Меню, текст `/help` и хендлеры собираются из одного списка команд, и тест падает,
+если они разъезжаются.
 
-The image carries Chromium but no display and no real Chrome, so it runs the bot,
-the migrations and the tests — not the scraping.
+## Конфигурация
 
-## Tests
-
-92 tests against an in-memory SQLite database. None touch the network.
-
-```bash
-poetry run pytest -q
-docker compose --profile test run --rm tests      # the same suite inside the image
-```
-
-CI additionally runs the migrations against a real PostgreSQL and asserts the
-resulting schema matches the models
-([`scripts/check_schema_drift.py`](scripts/check_schema_drift.py)) — the unit suite
-builds its schema from the models on SQLite, so it cannot see that class of drift by
-construction.
-
-## Configuration
-
-Every variable maps to a field in [`config.py`](bot/core/config.py); see
+Каждая переменная — поле в [`config.py`](bot/core/config.py); см.
 [`.env.example`](.env.example).
 
-| Variable | Default | Description |
+| Переменная | По умолчанию | Описание |
 | --- | --- | --- |
-| `BOT_TOKEN` | – | Telegram bot token from [@BotFather](https://t.me/botfather) (required) |
-| `ADMIN_TG_IDS` | – | Comma-separated admin Telegram user IDs |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./price_tracker.db` | Async SQLAlchemy URL; docker compose overrides it with Postgres |
-| `POSTGRES_PASSWORD` | – | Required by docker compose; there is deliberately no default |
-| `DEFAULT_LOCALE` | `ru` | Default language |
-| `DEFAULT_THRESHOLD_DELTA` | `5` | Default price-change threshold (%) |
-| `POLL_INTERVAL_SECONDS` | `900` | Polling interval |
-| `LOG_LEVEL` | `INFO` | Logging level |
-| `ALERT_COOLDOWN_HOURS` | `24` | Minimum gap between repeat alerts for one provider and status |
-| `PROVIDER_ERROR_WINDOW_SECONDS` | `3600` | Sliding window for the error counter; must be >= the poll interval |
-| `PROVIDER_ERROR_THRESHOLD` | `5` | Errors within the window before a provider is DOWN |
-| `HEADLESS_ENABLED` | `false` | Run the browser headless (the shops tested refuse it) |
-| `BROWSER_CHANNEL` | `chrome` | Playwright channel; empty falls back to bundled Chromium |
-| `BROWSER_PROFILE_DIR` | `.browser-profile` | Where the browser profile is kept |
-| `MIN_REQUEST_INTERVAL_SECONDS` | `30` | Minimum gap between requests to one host |
-| `PROXY_URL` | – | Optional proxy for the browser |
+| `BOT_TOKEN` | – | Токен бота от [@BotFather](https://t.me/botfather) (обязателен) |
+| `ADMIN_TG_IDS` | – | Telegram-id админов через запятую |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./price_tracker.db` | Async SQLAlchemy URL; compose подменяет на Postgres |
+| `DEFAULT_LOCALE` | `ru` | Язык по умолчанию (ru/en) |
+| `DEFAULT_THRESHOLD_DELTA` | `5` | Порог изменения цены по умолчанию (%) |
+| `POLL_INTERVAL_SECONDS` | `900` | Интервал опроса |
+| `LOG_LEVEL` | `INFO` | Уровень логирования |
+| `ALERT_COOLDOWN_HOURS` | `24` | Минимальный интервал между повторами алерта по одному провайдеру/статусу |
+| `PROVIDER_ERROR_WINDOW_SECONDS` | `7200` | Скользящее окно ошибок; должно превышать (порог − 1) × интервал опроса |
+| `PROVIDER_ERROR_THRESHOLD` | `5` | Ошибок в окне до перевода провайдера в DOWN |
+| `HEADLESS_ENABLED` | `false` | Headless-режим (проверенные магазины его отбивают) |
+| `BROWSER_CHANNEL` | `chrome` | Канал Playwright; пусто — встроенный Chromium |
+| `BROWSER_PROFILE_DIR` | `.browser-profile` | Где хранится профиль браузера |
+| `MIN_REQUEST_INTERVAL_SECONDS` | `30` | Минимальный интервал между запросами к одному хосту |
+| `PROXY_URL` | – | Опциональный прокси для браузера |
+| `GENERIC_PROVIDER_ENABLED` | `false` | Читать цену с любого сайта, не только со встроенных провайдеров; наводит браузер на произвольные URL — см. [Безопасность](#безопасность) |
+| `BLOCKED_HOSTS` | – | Хосты, которые generic-провайдеру нельзя открывать (через запятую; хост закрывает и поддомены) |
 
-## Bot commands
+## Тесты
 
-Arguments are optional: tapping a command in Telegram's menu sends it bare and the
-bot then asks for what it needs, offering buttons wherever a choice can be made
-instead of an id typed.
-
-**Users:** `/start`, `/add [url]`, `/list`, `/remove [id]`,
-`/monitor [set <id> <delta>]`, `/lang [ru|en]`, `/cancel`, `/help`.
-A bare link works with no command at all.
-
-**Admins:** `/provider_status`, `/alerts_on`, `/alerts_off`, `/health_reset` —
-published to admins only, via a per-chat command scope.
-
-The menu, the `/help` text and the handlers are all generated from one list
-([`commands.py`](bot/core/commands.py)), and a test fails if a handler exists without
-a declared command or the reverse.
-
-## Project layout
-
-```text
-bot/
-  cli.py               # market-price-check: fetch one URL and report
-  keyboards.py         # inline keyboards and their callback payloads
-  core/
-    commands.py        # the command list: menu, /help and handlers agree
-    config.py          # pydantic-settings, reads env / .env
-    clock.py           # one source of timezone-aware "now"
-    logging.py         # JSON logs to stdout
-    i18n.py            # ru/en translations with fallback
-    states.py          # FSM states for commands that ask for arguments
-    scheduler.py       # background price-polling loop
-    alerts.py          # alert cooldown + dedup
-    startup.py         # entry point
-    middlewares/       # admin ACL
-    providers/
-      base.py          # Provider interface, ProductData, error taxonomy
-      __init__.py      # registry / URL dispatch
-      strategies.py    # the self-reordering strategy chain
-      generic_parsers.py     # site-agnostic price readers
-      wildberries.py         # transport
-      wildberries_parsers.py # site-specific readers
-      browser.py       # shared Chrome session
-      throttle.py      # per-host minimum request interval
-      health.py        # provider health state machine
-    services/          # product / tracking business logic
-  handlers/            # bot command handlers and callbacks
-  models/              # SQLAlchemy models
-  utils/               # parsing / validation helpers
-docs/                  # marketplace-access.md: what was measured
-migrations/            # Alembic
-scripts/               # check_schema_drift.py, run in CI
-tests/                 # pytest (in-memory sqlite, no network)
+```bash
+poetry run pytest              # 196 тестов, in-memory SQLite, без сети
+poetry run ruff check . && poetry run ruff format --check .
+poetry run mypy
 ```
 
-## A note on scraping
+CI сверх этого прогоняет линт, типы и тесты на Python 3.13 и 3.14, накатывает
+миграции на настоящий PostgreSQL и проверяет, что схема сходится с моделями
+([`scripts/check_schema_drift.py`](scripts/check_schema_drift.py)), и собирает
+Docker-образ с прогоном тестов внутри.
 
-This is a personal-use project, and worth being exact about rather than claiming a
-clean conscience it has not earned.
+## Безопасность
 
-It reads publicly visible product pages slowly: fifteen minutes between polls,
-thirty seconds minimum between two requests to the same host, and a provider the
-health monitor marks DOWN is skipped for several cycles rather than retried. It uses
-no credentials, does not solve or bypass CAPTCHAs, and treats a site that serves one
-as a site that has said no.
+По умолчанию бот принимает ссылки только своих провайдеров (сейчас Wildberries), и
+браузер ходит на известные хосты. С `GENERIC_PROVIDER_ENABLED` бот начинает открывать
+произвольные ссылки от пользователей — это и есть суть режима «любой сайт», но значит,
+что настоящий браузер наводится на чужой ввод. Поэтому каждый фетч проходит через
+ворота [`url_safety.py`](bot/core/providers/url_safety.py):
 
-It does not present itself as an ordinary browser in perfect good faith: it hides the
-`navigator.webdriver` flag and passes `--disable-blink-features=AutomationControlled`.
-Whether either is still needed for the shipped provider is an open question — an A/B
-test was inconclusive because it accidentally compared profile warmth instead.
+- пропускаются только обычные публичные `http(s)`-адреса; `localhost`,
+  `*.local` / `*.internal` и литеральные адреса из приватных, loopback, link-local и
+  зарезервированных диапазонов отклоняются;
+- имя резолвится, и каждый полученный адрес проверяется по тем же правилам, чтобы имя
+  не подменяло внутренний адрес;
+- `BLOCKED_HOSTS` добавляет собственные домены и публичный IP деплоя;
+- адрес, на который увёл редирект, проверяется повторно, а имя, которое не резолвится,
+  не открывается.
 
-Before adding a shop, `robots.txt` is read for it; a site that denies data crawlers
-by name is treated as having answered, even when the product path itself is allowed.
-If you run this, keep the intervals where they are.
+Публичный инстанс я держу на встроенном провайдере (generic выключен), так что чужих
+URL он не открывает. Если включаешь generic на публичном боте — заполни `BLOCKED_HOSTS`
+своими хостами и по возможности запускай браузер под ограниченным пользователем:
+открывать чужие ссылки настоящим браузером стоит изолировать от остальной машины.
 
-## License
+## О скрейпинге
 
-[MIT](LICENSE) © Ilya Lyubimov
+Проект для личного использования. Страницы читаются медленно: 15 минут
+между опросами, не чаще раза в 30 секунд к одному хосту, провайдер в DOWN
+откладывается. Учётные данные не используются, капча не решается и не обходится —
+магазин, который её показал, считается ответившим «нет». Перед добавлением магазина
+читается его `robots.txt`. Интервалы подобраны намеренно, снижать их не стоит.
+
+## Лицензия
+
+MIT © Ilya Lyubimov

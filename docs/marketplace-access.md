@@ -1,117 +1,113 @@
-# What marketplaces actually serve to an automated client
+# Что маркетплейсы реально отдают автоматическому клиенту
 
-Measured in July 2026, from two different networks: a residential connection and
-a datacenter VM on an unrelated subnet. Every line below is something that was
-run, not something that was read in an article.
+Замерено в июле 2026 с двух разных сетей — домашней и датацентровой VM в чужой
+подсети. Каждая строка ниже — то, что я запускал, а не вычитал в статье.
 
-This exists because the interesting question for a price tracker is not "how do I
-parse HTML" but "will the page arrive at all", and the answer differs per site in
-ways that decide the whole design.
+Для трекера цен разбор HTML — не проблема. Проблема — доедет ли страница вообще, и
+у каждого сайта ответ свой, вплоть до того, что это задаёт всю архитектуру.
 
-## Transport: what gets a page
+## Транспорт: что отдаёт страницу
 
-| Client | Wildberries | DNS | Ozon | Yandex.Market | AliExpress | Avito |
+| Клиент | Wildberries | DNS | Ozon | Yandex.Market | AliExpress | Avito |
 | --- | --- | --- | --- | --- | --- | --- |
-| `curl` / `requests` | 403 | 401 Qrator | 403 | 302 | 200 + `x5sec` punish | 429 + captcha |
-| `curl_cffi`, 6 browser TLS fingerprints | — | — | 403 (18/18) | — | — | — |
-| Bundled Chromium, headless | 498 | — | challenge | — | — | — |
-| Bundled Chromium, headed | — | — | challenge | — | — | — |
-| Real Chrome, headed, cold profile | 498 | 401 | captcha | captcha | captcha | — |
-| **Real Chrome, headed, warm profile** | **200** | **200** | captcha | captcha | captcha | — |
+| `curl` / `requests` | 403 | 401 Qrator | 403 | 302 | 200 + `x5sec` | 429 + капча |
+| `curl_cffi`, 6 TLS-отпечатков браузеров | — | — | 403 (18/18) | — | — | — |
+| Встроенный Chromium, headless | 498 | — | челлендж | — | — | — |
+| Встроенный Chromium, с окном | — | — | челлендж | — | — | — |
+| Настоящий Chrome, с окном, холодный профиль | 498 | 401 | капча | капча | капча | — |
+| **Настоящий Chrome, с окном, прогретый профиль** | **200** | **200** | капча | капча | капча | — |
 
-Two conclusions the code is built on:
+Два вывода, на которых стоит код:
 
-**A real browser is the only transport that works anywhere.** TLS impersonation
-is not enough: `curl_cffi` was tried against Ozon impersonating Chrome 110, 120,
-124 and 131, Safari 17 and Firefox 133, across three endpoints — all eighteen
-combinations returned 403 with a JavaScript challenge page. Mobile-app hosts
-(`api.ozon.ru`, `xapi.ozon.ru`) with the app's own headers answered 403 and 402.
+**Настоящий браузер — единственный транспорт, который проходит везде.**
+TLS-имперсонация не спасает: `curl_cffi` гонял против Ozon под Chrome 110, 120, 124
+и 131, Safari 17 и Firefox 133, по трём эндпоинтам — все 18 комбинаций вернули 403
+со страницей JS-челленджа. Хосты мобильного приложения (`api.ozon.ru`,
+`xapi.ozon.ru`) с родными заголовками приложения ответили 403 и 402.
 
-**The browser profile is the asset, not the IP.** A cold profile is refused even
-from an address that has never contacted the site; the same profile, once it has
-been through the transparent challenge, is served normally. This is why
-`BROWSER_PROFILE_DIR` must survive restarts, and why the first fetch after a
-fresh deploy is slow and may fail.
+**Всё решает профиль браузера.** Холодный профиль отбивают даже с адреса, который к
+сайту никогда не обращался; тот же профиль, однажды прошедший прозрачный челлендж,
+обслуживают нормально. Поэтому `BROWSER_PROFILE_DIR` должен переживать перезапуски, а
+первый фетч после свежего деплоя медленный и может не пройти.
 
-A corollary worth stating because it contradicts the obvious guess: a datacenter
-IP was **not** the problem. Wildberries and DNS both work from the VM.
+Следствие, которое стоит назвать, потому что противоречит очевидной догадке:
+датацентровый IP проблемой не был. Wildberries и DNS работают с VM.
 
-## Headless, and the server case
+## Headless и случай сервера
 
-Both working sites reject headless — including headless *real* Chrome, not just
-Playwright's bundled Chromium. That looked like it confined the project to a
-desktop, but it does not: under a virtual framebuffer (`xvfb-run`) a headless
-server runs a headed browser and both sites are served normally. That is how the
-VM deployment works.
+Оба рабочих сайта отбивают headless — включая headless *настоящего* Chrome, не
+только встроенный Chromium из Playwright. Выглядело так, будто проект заперт на
+десктопе, но нет: под виртуальным фреймбуфером (`xvfb-run`) сервер без дисплея
+гоняет браузер с окном, и оба сайта обслуживают нормально. Так и работает деплой на
+VM.
 
-## Where the price hides
+## Где прячется цена
 
-Having got a page, the price is in a different place on each site, which is why
-the provider abstraction reads through a chain of strategies rather than one
-hard-coded path.
+Страница получена — дальше цена у каждого сайта лежит в своём месте, поэтому
+провайдер читает цепочкой стратегий, а не по одному зашитому пути.
 
-| Site | JSON-LD `offers.price` | Internal JSON API | Rendered DOM | Document title |
+| Сайт | JSON-LD `offers.price` | Внутренний JSON API | Отрисованный DOM | Заголовок документа |
 | --- | --- | --- | --- | --- |
-| Wildberries | no | **yes** (`/u-card/cards/v4/detail`, kopecks) | yes | **yes** ("купить за 558 ₽") |
-| DNS | **yes** | — | yes | no |
-| Ozon | yes (regular price, not the card price) | 403 even from the page's own context | yes, 3 figures + a unit rate | no |
+| Wildberries | нет | **да** (`/u-card/cards/v4/detail`, в копейках) | да | **да** («купить за 558 ₽») |
+| DNS | **да** | — | да | нет |
+| Ozon | да (обычная цена, не карточная) | 403 даже из контекста самой страницы | да, 3 цифры + цена за единицу | нет |
 
-Details that cost time to discover:
+Детали, на которые ушло время:
 
-- Wildberries' card API refuses a direct call — with `curl`, and even with
-  `fetch()` from the product page's own context. The response the page makes for
-  itself succeeds, so the provider reads that instead of replaying it.
-- Ozon renders three prices together (card price, regular price, struck-through
-  old price) plus a unit rate like "218 ₽ за 100 гр". Position alone is not
-  enough to tell them apart on cards that lack one of them, so the reader refuses
-  ambiguous shapes instead of guessing: a price out by a factor of two is worse
-  than a missed poll.
-- DNS publishes a sitemap index of 124 sub-sitemaps, 10 000 product URLs each,
-  which is the site's own supported way to enumerate the catalogue.
+- Card API Wildberries отказывает на прямой вызов — и `curl`, и даже `fetch()` из
+  контекста самой страницы товара. Ответ, который страница делает сама себе,
+  проходит, поэтому провайдер читает его, а не воспроизводит запрос.
+- Ozon рисует три цены разом (карточную, обычную, зачёркнутую старую) плюс цену за
+  единицу вроде «218 ₽ за 100 гр». По одной позиции их не различить на карточках,
+  где какой-то из них нет, поэтому ридер отказывается от неоднозначных форм, а не
+  гадает: цена, промахнувшаяся вдвое, хуже пропущенного опроса.
+- DNS публикует индекс sitemap из 124 под-sitemap по 10 000 URL товаров в каждом —
+  это собственный поддерживаемый сайтом способ обойти каталог.
 
-## Why Ozon is not shipped
+## Почему Ozon не отгружается
 
-Ozon serves a **captcha** — an explicit human-verification challenge — and, to
-its API hosts, a structured block record naming an incident:
+Ozon отдаёт **капчу** — явный человекопроверочный челлендж, — а своим API-хостам ещё
+и структурную запись о блокировке с номером инцидента:
 
 ```json
 {"incidentId": "fab_…", "blockURL": "…/block.html?…&bm=block_2",
  "supportURL": "…/complaint/support/?incident_id=…", "timeoutSec": 180}
 ```
 
-Getting an automated client past that is circumventing an access control, not
-finding a compatible configuration, so this project does not attempt it — with
-stealth-patched browsers, proxy rotation or captcha-solving services alike. It
-was verified that a virgin IP on an unrelated subnet is challenged on its first
-request, so this is not an individual block that a different address would avoid:
-the site refuses automated browsers as a class.
+Провести автоматического клиента мимо этого — обход access control, а не подбор
+совместимой конфигурации, поэтому проект этого не делает: ни stealth-патчами
+браузера, ни ротацией прокси, ни сервисами разгадывания капчи. Проверено, что чистый
+IP в чужой подсети получает челлендж на первом же запросе — значит это не
+индивидуальная блокировка, которую обошёл бы другой адрес: сайт отбивает
+автоматические браузеры как класс.
 
-The provider was therefore removed from the registry rather than shipped as code
-that always fails. Legitimate routes to Ozon data, if you need them, are the
-Seller API for your own listings, or a licensed data provider.
+Поэтому провайдер убран из реестра, а не отгружён как код, который всегда падает.
+Легальные маршруты к данным Ozon, если нужны, — Seller API для своих листингов или
+лицензированный поставщик данных.
 
-## robots.txt, checked per site
+## robots.txt, проверен по каждому сайту
 
-Access rules are only half the question; permission is the other half.
+Правила доступа — половина вопроса; вторая половина — разрешение.
 
-- **DNS** — `User-agent: *` has `Allow: /` plus explicit allows for `/product/*`
-  subpaths, no named-crawler denials, no crawl-delay, and a published sitemap.
-- **Wildberries** — product paths are not disallowed.
-- **Ozon** — every domain refused an automated client outright, so the question
-  did not arise.
-- **detmir.ru** — product paths are not disallowed, but the site denies
-  `MegaIndex` and `DataForSeoBot` by name, which reads as a clear position on
-  bulk data collection. Not used for that reason, despite being technically open.
+- **DNS** — у `User-agent: *` есть `Allow: /` плюс явные разрешения для подпутей
+  `/product/*`, никаких запретов на именованных краулеров, без crawl-delay, с
+  опубликованным sitemap.
+- **Wildberries** — пути товаров не запрещены.
+- **Ozon** — каждый домен отбил автоматического клиента сразу, так что вопрос не
+  встал.
+- **detmir.ru** — пути товаров не запрещены, но сайт поимённо отказывает `MegaIndex`
+  и `DataForSeoBot`, что читается как чёткая позиция про массовый сбор данных. Не
+  используется по этой причине, хоть технически и открыт.
 
-## Method notes
+## Заметки о методе
 
-Two mistakes worth recording, because both produced confident wrong answers
-before being caught:
+Две ошибки, которые стоит записать, потому что обе давали уверенный неправильный
+ответ, пока не поймались:
 
-- Substring-matching a page for `captcha` gives false positives. DNS product
-  pages contain `getCaptchaConfiguration` and `"Вы_не_робот"` inside a
-  localisation bundle for the login and feedback forms. Arrival must be decided
-  by the presence of the product, not by the absence of a word.
-- Comparing browser configurations with fresh profiles compares profile warmth,
-  not the configurations. An A/B test of the automation shim was inconclusive for
-  exactly this reason and is still open.
+- Substring-поиск `captcha` по странице даёт ложные срабатывания. На страницах
+  товаров DNS есть `getCaptchaConfiguration` и «Вы_не_робот» внутри локализационного
+  бандла для форм логина и обратной связи. О доезде страницы судить по наличию
+  товара, а не по отсутствию слова.
+- Сравнение конфигураций браузера на свежих профилях сравнивает прогретость профиля,
+  а не конфигурации. A/B-тест анти-автоматизационного шима именно поэтому вышел
+  неубедительным и до сих пор открыт.
