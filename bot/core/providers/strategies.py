@@ -17,7 +17,7 @@ declines to serve the page at all, every strategy sees the same closed door and
 the chain reports it as blocked.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -73,7 +73,7 @@ class ChainResult:
 class StrategyChain:
     """Ordered strategies with a memory of which one last worked."""
 
-    def __init__(self, strategies: dict[str, Strategy]) -> None:
+    def __init__(self, strategies: Mapping[str, Strategy]) -> None:
         if not strategies:
             raise ValueError('a strategy chain needs at least one strategy')
         self._strategies = dict(strategies)

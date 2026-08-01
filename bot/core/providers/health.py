@@ -11,8 +11,8 @@ from bot.models.enums import ProviderEnum, ProviderStatus
 class HealthMonitor:
     """Track provider failures over a sliding window and derive a status."""
 
-    def __init__(self):
-        self.errors: dict[ProviderEnum, deque] = {provider: deque() for provider in ProviderEnum}
+    def __init__(self) -> None:
+        self.errors: dict[ProviderEnum, deque[tuple[datetime, str]]] = {provider: deque() for provider in ProviderEnum}
         self.last_success: dict[ProviderEnum, datetime] = {}
         self.last_error: dict[ProviderEnum, datetime] = {}
         self.previous_status: dict[ProviderEnum, ProviderStatus] = {}

@@ -21,8 +21,12 @@ from decimal import Decimal, InvalidOperation
 
 from bot.core.providers.strategies import PageMaterial, PriceCandidate
 
-# Digits in a rendered price are separated by thin / non-breaking spaces.
-_SPACES = dict.fromkeys(map(ord, '    '), None)
+# Digit-group separators a rendered price can carry: ASCII space, non-breaking
+# space, thin space, narrow no-break space. Kept as one string so the strip
+# table and the money regex below cannot drift apart — a separator the regex
+# matches but the table does not strip parses to a fraction of the real price.
+_THOUSANDS_SEPARATORS = ' \u00a0\u2009\u202f'
+_SPACES = dict.fromkeys(map(ord, _THOUSANDS_SEPARATORS), None)
 
 # A price outside this range is a parsing accident: a review count, an article
 # number, or a value in kopecks.
@@ -33,7 +37,7 @@ MAX_PRICE = Decimal(100_000_000)
 # "218 ₽ за 100 гр", "1 200 ₽/шт".
 PER_UNIT_RE = re.compile(r'(\bза\b|/\s*(шт|кг|г|л|мл|м|pcs)\b|[₽$€]\s*/)', re.IGNORECASE)
 
-MONEY_RE = re.compile(r'([\d    ]{2,15})\s*(?:₽|руб|RUB)', re.IGNORECASE)
+MONEY_RE = re.compile(rf'([\d{_THOUSANDS_SEPARATORS}]{{2,15}})\s*(?:₽|руб|RUB)', re.IGNORECASE)
 
 _JSON_LD_RE = re.compile(
     r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
@@ -42,8 +46,20 @@ _JSON_LD_RE = re.compile(
 
 _DATA_STATE_RE = re.compile(r'data-state="([^"]{2,})"')
 
+# Inline scripts whose body might be the JSON a front end hydrates from. The
+# type is excluded so schema.org (application/ld+json) is left to its own reader.
+_INLINE_SCRIPT_RE = re.compile(
+    r'<script(?![^>]*type="application/ld\+json")[^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+# The JSON object inside an assignment like `window.__NUXT__ = {...}` or
+# `self.__INITIAL_STATE__={...}`: from the first brace to the end of the body.
+_INLINE_JSON_RE = re.compile(r'\{.*\}', re.DOTALL)
+
 _MICRODATA_RE = re.compile(
-    r'<[^>]*itemprop="price"[^>]*content="([^"]+)"|<[^>]*content="([^"]+)"[^>]*itemprop="price"',
+    r'<[^>]*itemprop="price"[^>]*content="([^"]+)"'  # <meta itemprop="price" content="...">
+    r'|<[^>]*content="([^"]+)"[^>]*itemprop="price"'  # attribute order reversed
+    r'|<[^>]*itemprop="price"[^>]*>([^<]+)<',  # <span itemprop="price">1090</span>
     re.IGNORECASE,
 )
 
@@ -55,7 +71,7 @@ _CURRENCY_BY_SYMBOL = {'₽': 'RUB', '$': 'USD', '€': 'EUR'}
 
 
 def money(raw: object) -> Decimal | None:
-    """Parse '2 414 ₽', '2414', '1499.00', 2414.0 — or give up.
+    """Parse '2 414 ₽', '42 990 ₽', '12,990', '1 234.56', '1499,00', 2414.0 — or give up.
 
     Giving up is a normal outcome, not an error: a reader that cannot find a
     plausible number hands over to the next one.
@@ -70,13 +86,22 @@ def money(raw: object) -> Decimal | None:
         return None
 
     cleaned = text.translate(_SPACES)
-    cleaned = re.sub(r'[₽$€]|руб\.?|RUB|USD|EUR', '', cleaned, flags=re.IGNORECASE)
-    cleaned = cleaned.replace(',', '.').strip()
+    cleaned = re.sub(r'[₽$€]|руб\.?|RUB|USD|EUR', '', cleaned, flags=re.IGNORECASE).strip()
+    # Drop digit-group separators — a comma or dot followed by exactly three
+    # digits that are not themselves part of a longer run — so "12,990" and
+    # "1,234.56" keep their magnitude. A comma that survives is then a decimal
+    # point ("1499,00" -> "1499.00"); "1499.00" is already correct.
+    cleaned = re.sub(r'(?<=\d)[,.](?=\d{3}(?:\D|$))', '', cleaned)
+    cleaned = cleaned.replace(',', '.')
     if not cleaned:
         return None
     try:
         value = Decimal(cleaned)
     except (InvalidOperation, ValueError):
+        return None
+    # NaN / Infinity are finite-looking to Decimal() but blow up the range
+    # comparison below, so they are rejected first.
+    if not value.is_finite():
         return None
     return value if MIN_PRICE <= value <= MAX_PRICE else None
 
@@ -114,16 +139,18 @@ def json_ld(material: PageMaterial) -> PriceCandidate:
     every product after the shop itself — "Регард", "Читай-город" — which is how
     this was found.
     """
-    title = None
+    fallback_title = None
     price = None
+    title = None
     currency = None
 
     for block in json_ld_blocks(material.html):
         if not _is_product(block):
             continue
 
-        if block.get('name') and not title:
-            title = str(block['name']).strip()
+        block_name = str(block['name']).strip() if block.get('name') else None
+        if block_name and not fallback_title:
+            fallback_title = block_name
 
         offers = block.get('offers')
         if isinstance(offers, list):
@@ -131,8 +158,14 @@ def json_ld(material: PageMaterial) -> PriceCandidate:
         if isinstance(offers, dict) and price is None:
             price = money(offers.get('price'))
             currency = offers.get('priceCurrency') or currency
+            if price is not None:
+                # Bind the title to the same block the price came from, so a
+                # page with several Product blocks cannot label the price of one
+                # with the name of another.
+                title = block_name
+                break
 
-    return PriceCandidate(price=price, title=title, currency=currency)
+    return PriceCandidate(price=price, title=title or fallback_title, currency=currency)
 
 
 def microdata(material: PageMaterial) -> PriceCandidate:
@@ -209,6 +242,23 @@ def hydration_state(material: PageMaterial) -> PriceCandidate:
             continue
         try:
             state = json.loads(unescaped)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        price = walk_for_price(state)
+        if price is not None:
+            return PriceCandidate(price=price)
+
+    # Inline scripts: `window.__INITIAL_STATE__ = {...}` and friends. The JSON
+    # object is sliced from its assignment and parsed; anything that is not
+    # valid JSON (a real script, JSONP, trailing semicolons) is skipped.
+    for body in _INLINE_SCRIPT_RE.findall(material.html):
+        if 'rice' not in body:
+            continue
+        match = _INLINE_JSON_RE.search(body)
+        if not match:
+            continue
+        try:
+            state = json.loads(match.group(0))
         except (json.JSONDecodeError, ValueError):
             continue
         price = walk_for_price(state)

@@ -40,7 +40,12 @@ async def main() -> None:
     scheduler_task = asyncio.create_task(scheduler.start(), name='price-scheduler')
 
     try:
-        await dp.start_polling(bot, allowed_updates=['message'])
+        # No allowed_updates= here on purpose. Passing a hand-written list
+        # ('message') overrides aiogram's own resolution and makes Telegram
+        # withhold every other update type server-side — callback_query included,
+        # which silently kills every inline button the bot ships. Omitting it lets
+        # aiogram compute the set from the registered handlers.
+        await dp.start_polling(bot)
     finally:
         logger.info('Shutting down')
         await scheduler.stop()

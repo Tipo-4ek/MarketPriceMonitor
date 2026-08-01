@@ -10,9 +10,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +55,9 @@ jobs:
       - name: Check formatting (ruff)
         run: poetry run ruff format --check .
 
+      - name: Type-check (mypy)
+        run: poetry run mypy
+
       - name: Run tests
         run: poetry run pytest -q
 
@@ -59,6 +66,7 @@ jobs:
     # see a migration that has drifted from them. This runs the real migrations
     # against a real Postgres and asks Alembic whether anything differs.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:18-alpine
@@ -101,6 +109,7 @@ jobs:
     # suite inside it. A container that only builds on the author's laptop is
     # not a container anybody else can use.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 

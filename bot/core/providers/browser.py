@@ -24,7 +24,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
 from bot.core.config import settings
 from bot.core.logging import get_logger
@@ -55,12 +55,18 @@ class BrowserSession:
         # Navigations are serialised: polling several products in parallel would
         # multiply the load we put on a marketplace for no real gain.
         self._lock = asyncio.Lock()
-        self._playwright = None
+        self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
 
     async def _ensure_context(self) -> BrowserContext:
+        # A live context is reused. When one closes — a crashed browser, an
+        # earlier shutdown — the `close` handler registered below nulls the
+        # cache, so the next call relaunches instead of handing back a dead
+        # context that fails every fetch and reads as the marketplace refusing
+        # us. (Nulling from the handler, not by calling close() here: this runs
+        # under self._lock, and close() takes the same non-reentrant lock.)
         if self._context is not None:
             return self._context
 
@@ -97,8 +103,17 @@ class BrowserSession:
                 await playwright.stop()
             raise
 
-        self._playwright, self._context = playwright, context
+        # Drop the cached context the moment it closes, so a crash or a shutdown
+        # cannot leave a dead handle to be reused.
+        context.on('close', self._on_context_closed)
+
+        self._playwright = playwright
+        self._context = context
         return context
+
+    def _on_context_closed(self, _context: BrowserContext) -> None:
+        self._context = None
+        self._page = None
 
     @contextlib.asynccontextmanager
     async def page(self) -> AsyncIterator[Page]:

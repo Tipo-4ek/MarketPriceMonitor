@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column(
             'provider',
-            sa.Enum('WILDBERRIES', name='providerenum'),
+            sa.Enum('WILDBERRIES', 'GENERIC', name='providerenum'),
             nullable=False,
         ),
         sa.Column('url', sa.String(length=1024), nullable=False),
@@ -61,6 +61,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['product_id'], ['products.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('user_id', 'product_id', name='uq_tracking_user_product'),
     )
     op.create_index(op.f('ix_trackings_product_id'), 'trackings', ['product_id'], unique=False)
     op.create_index(op.f('ix_trackings_user_id'), 'trackings', ['user_id'], unique=False)

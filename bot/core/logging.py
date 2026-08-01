@@ -36,8 +36,11 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload['exc_info'] = self.formatException(record.exc_info)
 
+        # Caller-supplied extras, but never at the cost of the envelope: a
+        # logger.info(..., extra={'level': ...}) must not rewrite the record's
+        # real level or timestamp.
         for key, value in record.__dict__.items():
-            if key not in _RESERVED:
+            if key not in _RESERVED and key not in payload:
                 payload[key] = value
 
         return json.dumps(payload, ensure_ascii=False, default=str)

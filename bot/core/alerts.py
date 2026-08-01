@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 class AlertManager:
     """Manages provider health alerts with cooldown and deduplication."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.alerts_enabled = True
         self.last_alerts: dict[tuple[ProviderEnum, ProviderStatus], datetime] = {}
 
@@ -35,7 +35,7 @@ class AlertManager:
         """Record that an alert was sent."""
         key = (provider, status)
         self.last_alerts[key] = utcnow()
-        logger.info(f'Alert recorded for {provider.value} with status {status.value}')
+        logger.info('Alert recorded', extra={'provider': provider.value, 'status': status.value})
 
     def enable_alerts(self) -> None:
         """Enable alerts."""

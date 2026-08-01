@@ -14,7 +14,7 @@ Three independent readers, ordered cheapest-and-most-precise first:
 import re
 from decimal import Decimal
 
-from bot.core.providers.generic_parsers import money
+from bot.core.providers.generic_parsers import HTML_STRATEGIES, PER_UNIT_RE, money, rendered_text
 from bot.core.providers.strategies import PageMaterial, PriceCandidate
 
 _KOPECKS = Decimal(100)
@@ -54,12 +54,23 @@ def card_api(material: PageMaterial) -> PriceCandidate:
 
 
 def dom_price(material: PageMaterial) -> PriceCandidate:
-    """The rendered price block, for when the API shape has moved."""
-    matches = [money(raw) for raw in _DOM_PRICE_RE.findall(material.widget_text)]
-    prices = [value for value in matches if value is not None]
+    """The rendered price block, for when the API shape has moved.
+
+    Read line by line and drop unit rates first ("218 ₽ за 100 гр"): taking the
+    first ₽ figure blindly reads that rate as the price and stores a number off
+    by a large factor. Of what is left, the block shows the payable price first,
+    then the struck-through one.
+    """
+    prices = []
+    for line in material.widget_text.splitlines():
+        if PER_UNIT_RE.search(line):
+            continue
+        for raw in _DOM_PRICE_RE.findall(line):
+            value = money(raw)
+            if value is not None:
+                prices.append(value)
     if not prices:
         return PriceCandidate(price=None)
-    # The block shows the payable price first, then the struck-through one.
     return PriceCandidate(price=prices[0])
 
 
@@ -71,8 +82,14 @@ def page_title(material: PageMaterial) -> PriceCandidate:
     return PriceCandidate(price=money(match.group(1)))
 
 
+# Wildberries-specific readers first — precise and cheapest on this shop — then
+# the site-agnostic readers as a fallback for the day the API and the markup
+# both move. The provider already fills ``material.html`` and ``widget_text``, so
+# the generic readers cost no extra request to the shop.
 WILDBERRIES_STRATEGIES = {
     'card_api': card_api,
     'dom_price': dom_price,
     'page_title': page_title,
+    **HTML_STRATEGIES,
+    'rendered_text': rendered_text,
 }

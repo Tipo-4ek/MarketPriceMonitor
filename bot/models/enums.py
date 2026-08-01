@@ -4,14 +4,21 @@ import enum
 
 
 class ProviderEnum(enum.StrEnum):
-    """Marketplaces with a working provider implementation.
+    """Providers the bot can fetch a price through.
 
-    A member is added here only when a provider actually fetches prices for it:
-    the registry is keyed by this enum, so a speculative member would be a
-    marketplace the bot claims to support and then fails on.
+    A member is added only when something actually reads a price for it: the
+    registry is keyed by this enum, so a speculative member would be a promise
+    the bot then fails on.
+
+    ``WILDBERRIES`` is a site-specific provider — its own transport and readers.
+    ``GENERIC`` is the opt-in fallback for any other host (see
+    ``GENERIC_PROVIDER_ENABLED``): it has no site knowledge and reads price only
+    from the markup a shop publishes (schema.org, Open Graph, hydration JSON),
+    which covers most shops but not a page with none.
     """
 
     WILDBERRIES = 'wildberries'
+    GENERIC = 'generic'
 
 
 class ProviderStatus(enum.StrEnum):

@@ -8,34 +8,31 @@ These tests make the drift a failing build instead of a support question.
 
 from functools import cache
 
-from aiogram import Dispatcher
 from aiogram.filters import Command
 
 from bot.core.commands import ADMIN_COMMANDS, ALL_COMMANDS, USER_COMMANDS, command_reference
 from bot.core.i18n import TRANSLATIONS
-from bot.handlers import setup_handlers
+from bot.handlers import admin, common, monitor, tracking
 from bot.handlers.common import help_text
 
 LOCALES = tuple(TRANSLATIONS)
+
+# The module-level routers the bot wires together. Inspected directly rather
+# than through a Dispatcher: a router is a singleton that can be attached to
+# exactly one Dispatcher per process, and building one here would collide with
+# the shared dispatcher the integration tests use.
+_ROUTERS = (common.router, tracking.router, monitor.router, admin.router)
 
 
 @cache
 def registered_commands() -> frozenset[str]:
     """Every command string the bot actually has a handler for.
 
-    Cached because the routers are module-level singletons: aiogram refuses to
-    attach one to a second Dispatcher, so this may only run once per process.
-    Going through setup_handlers keeps it honest — the set comes from the same
-    wiring the bot itself uses, not from a list repeated here.
+    Read from the same routers the bot itself includes, so it stays honest — the
+    set comes from the real wiring, not from a list repeated here.
     """
-    dispatcher = Dispatcher()
-    setup_handlers(dispatcher)
-
     found: set[str] = set()
-    routers = [dispatcher, *dispatcher.sub_routers]
-    while routers:
-        router = routers.pop()
-        routers.extend(getattr(router, 'sub_routers', []))
+    for router in _ROUTERS:
         for handler in router.message.handlers:
             for handler_filter in handler.filters or ():
                 callback = getattr(handler_filter, 'callback', None)
@@ -99,3 +96,46 @@ def test_usage_shows_the_arguments_a_command_takes():
     assert usages['monitor'] == '/monitor [set <id> <delta>]'
     # A command with no arguments must not render a trailing space.
     assert usages['list'] == '/list'
+
+
+class _RecordingBot:
+    """Records set_my_commands calls the way register_bot_commands makes them."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def set_my_commands(self, commands, scope=None, language_code=None):
+        self.calls.append({'scope': type(scope).__name__, 'language_code': language_code, 'n': len(commands)})
+
+
+async def test_register_bot_commands_publishes_every_scope(isolated_settings):
+    from bot.core.commands import register_bot_commands
+
+    bot = _RecordingBot()
+    await register_bot_commands(bot)
+
+    # Two default-scope publications (en + ru), and per admin two more.
+    default_calls = [c for c in bot.calls if c['scope'] == 'BotCommandScopeDefault']
+    admin_calls = [c for c in bot.calls if c['scope'] == 'BotCommandScopeChat']
+    assert len(default_calls) == 2
+    assert len(admin_calls) == 2 * len(isolated_settings.admin_ids)
+    # The admin scope carries the full command set, the default only the user one.
+    assert all(c['n'] == len(ALL_COMMANDS) for c in admin_calls)
+    assert all(c['n'] == len(USER_COMMANDS) for c in default_calls)
+
+
+async def test_register_bot_commands_survives_a_telegram_failure(isolated_settings, monkeypatch):
+    import bot.core.commands as commands_module
+
+    async def _instant_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(commands_module.asyncio, 'sleep', _instant_sleep)
+
+    class BrokenBot:
+        async def set_my_commands(self, *a, **k):
+            raise RuntimeError('telegram down')
+
+    # It retries and swallows: publishing the menu is a nicety, not a reason to
+    # fail startup. The call returns without raising.
+    await commands_module.register_bot_commands(BrokenBot())

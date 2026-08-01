@@ -91,7 +91,7 @@ class WildberriesProvider(Provider):
                 raise ProviderBlockedError(f'Wildberries did not serve the page: {exc}') from exc
 
         result = await self._chain.run(material)
-        if result is None:
+        if result is None or result.candidate.price is None:
             raise PriceNotFoundError(f'Opened the Wildberries page for {article} but found no price')
 
         title = result.candidate.title or f'Wildberries {article}'
@@ -100,7 +100,20 @@ class WildberriesProvider(Provider):
     # --- page handling ---------------------------------------------------
 
     async def _gather(self, page, product_url: str, article: str) -> PageMaterial:
-        """Load the page and collect everything the readers might need."""
+        """Load the page and collect everything the readers might need.
+
+        The browser session hands out one long-lived page, so the document from
+        the previous product is still displayed until this navigation replaces
+        it. Two things follow. First, we blank the page before navigating: if the
+        goto below fails, the readers see an empty document and the chain reports
+        no price, rather than reading the previous product's markup and returning
+        its price under this URL. Second, a goto that never reaches the article
+        is a refusal — it is re-raised so :meth:`fetch_product` maps it to
+        ``ProviderBlockedError`` — whereas the card API merely not being seen is
+        recoverable, because the markup and the title still carry the price.
+        """
+        await page.goto('about:blank')
+
         payload = None
         try:
             async with page.expect_response(
@@ -108,14 +121,19 @@ class WildberriesProvider(Provider):
                 timeout=_CARD_API_TIMEOUT_MS,
             ) as response_info:
                 await page.goto(product_url, wait_until='domcontentloaded', timeout=60_000)
-            payload = await (await response_info.value).json()
-        except PlaywrightError:
-            # The page loaded but never issued (or was refused) its own card
-            # request. Not fatal: the markup and the title still carry the price.
+        except PlaywrightError as exc:
+            # Distinguish a failed navigation from a merely-unseen card call by
+            # asking where the page actually ended up. `about:blank`, or any URL
+            # without this product's article, means the page never loaded — a
+            # refusal, not a parse problem.
+            if article not in page.url:
+                raise ProviderBlockedError(f'Wildberries did not serve the page: {exc}') from exc
             logger.info('Wildberries card API not seen; falling back to the page', extra={'article': article})
-            await page.wait_for_timeout(2_000)
-        except Exception as exc:
-            logger.info('Could not read the card payload', extra={'article': article, 'error': str(exc)})
+        else:
+            try:
+                payload = await (await response_info.value).json()
+            except Exception as exc:
+                logger.info('Could not read the card payload', extra={'article': article, 'error': str(exc)})
 
         return PageMaterial(
             url=product_url,

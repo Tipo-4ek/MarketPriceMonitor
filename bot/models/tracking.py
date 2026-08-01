@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer
+from sqlalchemy import DateTime, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.core.clock import utcnow
@@ -18,6 +18,10 @@ class Tracking(Base):
     """User-product tracking relationship."""
 
     __tablename__ = 'trackings'
+    # One tracking per (user, product): the get-or-create in TrackingService
+    # checks first, and this makes the check safe under two concurrent /add —
+    # the second insert is refused instead of duplicating the row and the alert.
+    __table_args__ = (UniqueConstraint('user_id', 'product_id', name='uq_tracking_user_product'),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)

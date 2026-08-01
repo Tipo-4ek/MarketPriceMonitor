@@ -227,6 +227,69 @@ async def test_one_failing_product_does_not_abort_the_cycle(wired_db, clean_heal
         assert (await session.get(Product, first_id)).last_price == Decimal('100')
 
 
+async def test_a_custom_threshold_overrides_the_default(wired_db, clean_health, isolated_settings):
+    """A tracking with its own threshold must gate the alert, not the default."""
+    maker, _product_id = wired_db
+    async with maker() as session:
+        tracking = (await session.execute(select(Tracking))).scalars().one()
+        tracking.custom_threshold_delta = 20  # only report moves of 20%+
+        await session.commit()
+
+    # 100 -> 90 is a 10% move: past the 5% default, but under this user's 20%.
+    bot = FakeBot()
+    scheduler = PriceScheduler(bot, FakeRegistry(FakeProvider(price=Decimal('90'))))
+    await scheduler._check_prices()
+    assert bot.sent == []
+
+    # 90 -> 45 is a 50% move: over 20%, so exactly one message goes out.
+    bot = FakeBot()
+    scheduler = PriceScheduler(bot, FakeRegistry(FakeProvider(price=Decimal('45'))))
+    await scheduler._check_prices()
+    assert len(bot.sent) == 1
+
+
+async def test_admins_are_alerted_when_a_provider_goes_down(wired_db, clean_health, isolated_settings, monkeypatch):
+    from bot.core.alerts import AlertManager
+
+    monkeypatch.setattr('bot.core.scheduler.alert_manager', AlertManager())
+    # One admin, addressable by the FakeBot.
+    monkeypatch.setattr(isolated_settings, 'admin_tg_ids', '777')
+
+    bot = FakeBot()
+    provider = FakeProvider(error=ProviderBlockedError('anti-bot'))
+    scheduler = PriceScheduler(bot, FakeRegistry(provider))
+
+    for _ in range(isolated_settings.provider_error_threshold):
+        await scheduler._check_prices()
+
+    assert clean_health.get_status(ProviderEnum.WILDBERRIES) is ProviderStatus.DOWN
+    # The admin was told, at least once, addressed by id.
+    admin_messages = [text for chat_id, text in bot.sent if chat_id == 777]
+    assert admin_messages, 'no admin alert was sent'
+
+
+async def test_a_failed_admin_send_does_not_arm_the_cooldown(wired_db, clean_health, isolated_settings, monkeypatch):
+    """If every admin send fails, the alert must be retried, not silenced 24h."""
+    from bot.core.alerts import AlertManager
+
+    manager = AlertManager()
+    monkeypatch.setattr('bot.core.scheduler.alert_manager', manager)
+    monkeypatch.setattr(isolated_settings, 'admin_tg_ids', '777')
+
+    from aiogram.exceptions import TelegramAPIError
+
+    class BrokenBot(FakeBot):
+        async def send_message(self, chat_id, text, **kwargs):
+            raise TelegramAPIError(method=None, message='telegram down')
+
+    scheduler = PriceScheduler(BrokenBot(), FakeRegistry(FakeProvider(error=ProviderBlockedError('x'))))
+    for _ in range(isolated_settings.provider_error_threshold):
+        await scheduler._check_prices()
+
+    # Delivery failed, so the DOWN cooldown was never recorded.
+    assert manager.should_send_alert(ProviderEnum.WILDBERRIES, ProviderStatus.DOWN) is True
+
+
 @pytest.mark.parametrize('bad_title', ['Thing & Co <b>', 'A < B & C'])
 async def test_marketplace_titles_are_escaped_in_notifications(wired_db, clean_health, isolated_settings, bad_title):
     maker, product_id = wired_db

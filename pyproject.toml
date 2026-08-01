@@ -27,16 +27,17 @@ market-price-check = "bot.cli:main"
 [dependency-groups]
 dev = [
     "ruff (>=0.16.0,<0.17.0)",
+    "mypy (>=1.11.0,<2.0.0)",
     "pytest (>=9.1.1,<10.0.0)",
     "pytest-asyncio (>=1.4.0,<2.0.0)",
-    "pytest-mock (>=3.15.1,<4.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
 ]
 
 [tool.poetry]
 packages = [{ include = "bot" }]
 
 [build-system]
-requires = ["poetry-core>=2.0.0"]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
@@ -44,7 +45,18 @@ line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "Q", "T20", "UP", "B", "ASYNC", "SIM", "RUF"]
+select = [
+    "E", "F", "W", "I", "Q", "T20", "UP", "B", "ASYNC", "SIM", "RUF",
+    # Correctness- and clarity-focused sets the tree already passes clean:
+    "DTZ",   # naive datetimes — this project is timezone-aware throughout
+    "LOG", "G",  # logging: no f-strings / % in log calls, structured extras only
+    "PERF",  # obvious performance anti-patterns
+    "C4", "PIE", "RET", "FLY", "SIM",  # comprehensions, returns, misc simplification
+    "ICN", "TID", "TC",  # import conventions, tidy imports, type-checking imports
+    "N",     # pep8 naming
+    "PGH",   # blanket noqa / type-ignore hygiene
+    "SLOT", "INT",
+]
 ignore = [
     # The formatter owns line width; E501 on long string literals (i18n
     # messages, page fixtures) is noise it cannot fix.
@@ -64,6 +76,14 @@ inline-quotes = "single"
 quote-style = "single"
 indent-style = "space"
 
+[tool.mypy]
+python_version = "3.13"
+files = ["bot", "scripts"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -72,3 +92,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "--cov=bot --cov-report=term-missing --cov-fail-under=85"
+
+[tool.coverage.run]
+source = ["bot"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# Entry points and the browser transport are exercised by hand against a live
+# marketplace (market-price-check), not in the network-free unit suite.
+omit = ["bot/core/startup.py", "bot/core/providers/browser.py"]

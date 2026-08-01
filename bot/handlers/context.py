@@ -12,7 +12,7 @@ from bot.models import base
 
 async def user_locale(tg_user_id: int) -> str:
     """The user's language, creating the user row on first contact."""
-    async with base.async_session_maker() as session:
+    async with base.new_session() as session:
         user = await TrackingService.get_or_create_user(session, tg_user_id)
         await session.commit()
         return user.locale
@@ -20,7 +20,7 @@ async def user_locale(tg_user_id: int) -> str:
 
 async def tracked_labels(tg_user_id: int) -> dict[int, str]:
     """Product id -> short button label, for the product pickers."""
-    async with base.async_session_maker() as session:
+    async with base.new_session() as session:
         user = await TrackingService.get_or_create_user(session, tg_user_id)
         trackings = await TrackingService.get_user_trackings(session, user)
         await session.commit()

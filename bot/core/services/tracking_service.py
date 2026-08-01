@@ -1,6 +1,9 @@
 """Tracking service for managing user-product tracking."""
 
-from sqlalchemy import delete, select
+from collections.abc import Sequence
+
+from sqlalchemy import Row, delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.core.logging import get_logger
@@ -22,7 +25,7 @@ class TrackingService:
             user = User(tg_user_id=tg_user_id, locale=locale)
             session.add(user)
             await session.flush()
-            logger.info(f'Created user: {tg_user_id}')
+            logger.info('Created user', extra={'tg_user_id': tg_user_id})
 
         return user
 
@@ -32,10 +35,11 @@ class TrackingService:
     ) -> tuple[Tracking, bool]:
         """Add tracking for user and product.
 
-        Returns:
-            Tuple of (tracking, created) where created is True if tracking was newly created.
+        Returns a ``(tracking, created)`` pair; ``created`` is True only when a
+        new row was inserted. The ``uq_tracking_user_product`` constraint makes
+        this idempotent under concurrency: two simultaneous /add for the same
+        pair cannot both insert, so a user is never notified twice for one move.
         """
-        # Check if tracking exists
         result = await session.execute(
             select(Tracking).where(Tracking.user_id == user.id, Tracking.product_id == product.id)
         )
@@ -44,18 +48,16 @@ class TrackingService:
         if existing_tracking:
             return existing_tracking, False
 
-        # Create new tracking
         tracking = Tracking(user_id=user.id, product_id=product.id, custom_threshold_delta=custom_threshold)
-
         session.add(tracking)
         await session.flush()
 
-        logger.info(f'Created tracking: user={user.tg_user_id}, product={product.id}')
+        logger.info('Created tracking', extra={'tg_user_id': user.tg_user_id, 'product_id': product.id})
         return tracking, True
 
     @staticmethod
-    async def get_user_trackings(session: AsyncSession, user: User) -> list[tuple[Tracking, Product]]:
-        """Get all trackings for user with product details."""
+    async def get_user_trackings(session: AsyncSession, user: User) -> Sequence[Row[tuple[Tracking, Product]]]:
+        """Get all trackings for user with product details, oldest first."""
         result = await session.execute(
             select(Tracking, Product).join(Product).where(Tracking.user_id == user.id).order_by(Tracking.created_at)
         )
@@ -63,16 +65,13 @@ class TrackingService:
 
     @staticmethod
     async def remove_tracking(session: AsyncSession, user: User, product_id: int) -> bool:
-        """Remove tracking by product ID.
-
-        Returns:
-            True if tracking was removed, False if not found.
-        """
+        """Remove tracking by product ID. Returns True if a row was removed."""
         result = await session.execute(
             delete(Tracking).where(Tracking.user_id == user.id, Tracking.product_id == product_id)
         )
         await session.flush()
-        return result.rowcount > 0
+        # execute() of a DELETE returns a CursorResult, which carries rowcount.
+        return isinstance(result, CursorResult) and result.rowcount > 0
 
     @staticmethod
     async def update_tracking_threshold(
@@ -88,7 +87,8 @@ class TrackingService:
             tracking.custom_threshold_delta = threshold
             await session.flush()
             logger.info(
-                f'Updated threshold for tracking: user={user.tg_user_id}, product={product_id}, threshold={threshold}'
+                'Updated tracking threshold',
+                extra={'tg_user_id': user.tg_user_id, 'product_id': product_id, 'threshold': threshold},
             )
 
         return tracking
@@ -98,4 +98,4 @@ class TrackingService:
         """Update user locale."""
         user.locale = locale
         await session.flush()
-        logger.info(f'Updated locale for user {user.tg_user_id}: {locale}')
+        logger.info('Updated user locale', extra={'tg_user_id': user.tg_user_id, 'locale': locale})

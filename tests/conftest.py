@@ -38,6 +38,56 @@ def isolated_settings(monkeypatch):
     return settings
 
 
+@pytest.fixture(autouse=True)
+def no_throttle(monkeypatch):
+    """Neutralise the global per-host throttle so tests never sleep 30s.
+
+    The real interval is exercised by test_throttle.py against its own Throttle
+    instances; anything driving the live fetch path here should not pay it.
+    """
+    from bot.core.providers.throttle import throttle
+
+    monkeypatch.setattr(throttle, 'min_interval_seconds', 0.0)
+    throttle._last_request.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_singletons():
+    """Reset the module-global health monitor and alert manager between tests.
+
+    Both are process-level singletons; without this a recorded alert or error in
+    one test would leak its 24h cooldown or its error window into the next, and
+    the suite would pass or fail on ordering.
+    """
+    from bot.core.alerts import alert_manager
+    from bot.core.providers.health import health_monitor
+
+    health_monitor.reset()
+    alert_manager.reset()
+    alert_manager.enable_alerts()
+    yield
+    health_monitor.reset()
+    alert_manager.reset()
+    alert_manager.enable_alerts()
+
+
+@pytest.fixture(scope='session')
+def configured_dispatcher():
+    """One Dispatcher with every handler wired, shared across the session.
+
+    The handler routers are module-level singletons: aiogram attaches each to a
+    single Dispatcher per process, so the integration tests must share one.
+    """
+    from aiogram import Dispatcher
+    from aiogram.fsm.storage.memory import MemoryStorage
+
+    from bot.handlers import setup_handlers
+
+    dp = Dispatcher(storage=MemoryStorage())
+    setup_handlers(dp)
+    return dp
+
+
 def _make_engine():
     """Create the test engine, keeping in-memory SQLite alive across connections."""
     if TEST_DATABASE_URL.startswith('sqlite') and ':memory:' not in TEST_DATABASE_URL:

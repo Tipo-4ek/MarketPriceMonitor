@@ -11,6 +11,7 @@ from bot.core.logging import get_logger
 from bot.core.services.tracking_service import TrackingService
 from bot.core.states import Flow
 from bot.handlers.context import user_locale
+from bot.handlers.replies import edit_or_send, sender_id
 from bot.keyboards import CB_CANCEL, CB_LOCALE, CB_MENU_HELP, locale_choices, main_menu
 from bot.models import base
 from bot.utils.validators import validate_locale
@@ -18,6 +19,8 @@ from bot.utils.validators import validate_locale
 logger = get_logger(__name__)
 
 router = Router()
+
+_NOT_A_COMMAND = ~F.text.startswith('/')
 
 
 def help_text(locale: str, *, include_admin: bool) -> str:
@@ -37,7 +40,7 @@ def help_text(locale: str, *, include_admin: bool) -> str:
 async def cmd_cancel(message: Message, state: FSMContext):
     """Leave whatever the bot was waiting for."""
     await state.clear()
-    locale = await user_locale(message.from_user.id)
+    locale = await user_locale(sender_id(message))
     await message.answer(get_text(locale, 'cancelled'), reply_markup=main_menu(locale))
 
 
@@ -45,8 +48,8 @@ async def cmd_cancel(message: Message, state: FSMContext):
 async def cb_cancel(callback: CallbackQuery, state: FSMContext):
     """The Cancel button shown while the bot is waiting for input."""
     await state.clear()
-    locale = await user_locale(callback.from_user.id)
-    await callback.message.edit_text(get_text(locale, 'cancelled'), reply_markup=main_menu(locale))
+    locale = await user_locale(sender_id(callback))
+    await edit_or_send(callback, get_text(locale, 'cancelled'), reply_markup=main_menu(locale))
     await callback.answer()
 
 
@@ -54,7 +57,7 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext):
 async def cmd_start(message: Message, state: FSMContext):
     """Handle /start command."""
     await state.clear()
-    locale = await user_locale(message.from_user.id)
+    locale = await user_locale(sender_id(message))
     await message.answer(
         get_text(locale, 'welcome'),
         parse_mode='HTML',
@@ -67,7 +70,7 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cmd_help(message: Message, state: FSMContext, is_admin: bool = False):
     """Handle /help command."""
     await state.clear()
-    locale = await user_locale(message.from_user.id)
+    locale = await user_locale(sender_id(message))
     await message.answer(help_text(locale, include_admin=is_admin), reply_markup=main_menu(locale))
 
 
@@ -75,24 +78,25 @@ async def cmd_help(message: Message, state: FSMContext, is_admin: bool = False):
 async def cb_help(callback: CallbackQuery, state: FSMContext):
     """The Help button."""
     await state.clear()
-    locale = await user_locale(callback.from_user.id)
-    await callback.message.edit_text(help_text(locale, include_admin=False), reply_markup=main_menu(locale))
+    locale = await user_locale(sender_id(callback))
+    await edit_or_send(callback, help_text(locale, include_admin=False), reply_markup=main_menu(locale))
     await callback.answer()
 
 
 @router.message(Command('lang'))
 async def cmd_lang(message: Message, command: CommandObject, state: FSMContext):
     """`/lang ru` acts at once; a bare `/lang` offers the two languages."""
+    await state.clear()
     if command.args:
         await _apply_locale(message, command.args.strip().lower())
         return
 
-    locale = await user_locale(message.from_user.id)
+    locale = await user_locale(sender_id(message))
     await state.set_state(Flow.locale_choice)
     await message.answer(get_text(locale, 'prompt_lang'), reply_markup=locale_choices(locale))
 
 
-@router.message(Flow.locale_choice)
+@router.message(Flow.locale_choice, F.text, _NOT_A_COMMAND)
 async def locale_typed(message: Message, state: FSMContext):
     """A language code typed instead of tapping a button."""
     await state.clear()
@@ -103,24 +107,25 @@ async def locale_typed(message: Message, state: FSMContext):
 async def cb_locale(callback: CallbackQuery, state: FSMContext):
     """A language picked from the keyboard."""
     await state.clear()
-    locale = callback.data.split(':')[1]
+    locale = (callback.data or '').split(':')[1]
     if not validate_locale(locale):
         await callback.answer()
         return
 
-    async with base.async_session_maker() as session:
-        user = await TrackingService.get_or_create_user(session, callback.from_user.id)
+    async with base.new_session() as session:
+        user = await TrackingService.get_or_create_user(session, sender_id(callback))
         await TrackingService.update_user_locale(session, user, locale)
         await session.commit()
 
-    await callback.message.edit_text(get_text(locale, 'language_changed'), reply_markup=main_menu(locale))
+    await edit_or_send(callback, get_text(locale, 'language_changed'), reply_markup=main_menu(locale))
     await callback.answer()
-    logger.info('Locale changed', extra={'tg_user_id': callback.from_user.id, 'locale': locale})
+    logger.info('Locale changed', extra={'tg_user_id': sender_id(callback), 'locale': locale})
 
 
 async def _apply_locale(message: Message, locale: str) -> None:
-    async with base.async_session_maker() as session:
-        user = await TrackingService.get_or_create_user(session, message.from_user.id)
+    tg_user_id = sender_id(message)
+    async with base.new_session() as session:
+        user = await TrackingService.get_or_create_user(session, tg_user_id)
 
         if not validate_locale(locale):
             await session.commit()
@@ -131,4 +136,4 @@ async def _apply_locale(message: Message, locale: str) -> None:
         await session.commit()
 
     await message.answer(get_text(locale, 'language_changed'), reply_markup=main_menu(locale))
-    logger.info('Locale changed', extra={'tg_user_id': message.from_user.id, 'locale': locale})
+    logger.info('Locale changed', extra={'tg_user_id': tg_user_id, 'locale': locale})

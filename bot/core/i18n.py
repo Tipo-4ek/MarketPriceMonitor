@@ -37,7 +37,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'btn_remove_id': 'Убрать #{product_id}',
         'btn_threshold_id': 'Порог #{product_id}',
         'btn_back': '← К списку',
-        'choose_threshold': 'Товар #{product_id}: при каком изменении цены писать?',
         'language_changed': 'Язык переключён на русский.',
         'invalid_language': 'Доступны ru и en.',
         'product_added': 'Добавил: <b>{title}</b>\n{price} {currency}\nID {product_id}',
@@ -53,11 +52,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         ),
         'threshold_default': 'по умолчанию',
         'no_tracked_products': 'Пока ничего не отслеживается. Пришлите ссылку на товар.',
+        'list_truncated': '…и ещё {count}. Показать их — уберите часть товаров через /remove.',
         'product_removed': 'Убрал из отслеживания.',
         'product_not_found': 'Товар с таким ID не найден.',
         'invalid_product_id': 'ID — это число. Свои можно посмотреть командой /list.',
         'custom_threshold_set': 'Порог для товара {product_id}: {delta}%.',
         'invalid_threshold': 'Порог — целое число от 1 до 100.',
+        'monitor_usage': 'Формат: /monitor set <id> <процент>. Или просто нажмите /monitor.',
         'price_changed': (
             'Цена изменилась: <b>{title}</b>\n'
             '{old_price} → {new_price} {currency} ({change}%)\n'
@@ -100,7 +101,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'btn_remove_id': 'Remove #{product_id}',
         'btn_threshold_id': 'Threshold #{product_id}',
         'btn_back': '← Back to list',
-        'choose_threshold': 'Product #{product_id}: how big a price move should I report?',
         'language_changed': 'Language switched to English.',
         'invalid_language': 'Available: ru, en.',
         'product_added': 'Added: <b>{title}</b>\n{price} {currency}\nID {product_id}',
@@ -116,11 +116,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         ),
         'threshold_default': 'default',
         'no_tracked_products': 'Nothing tracked yet. Send a product link.',
+        'list_truncated': '…and {count} more. To see them, remove some with /remove.',
         'product_removed': 'Removed from tracking.',
         'product_not_found': 'No product with that ID.',
         'invalid_product_id': 'The ID is a number. Use /list to see yours.',
         'custom_threshold_set': 'Threshold for product {product_id}: {delta}%.',
         'invalid_threshold': 'The threshold is a whole number from 1 to 100.',
+        'monitor_usage': 'Format: /monitor set <id> <percent>. Or just tap /monitor.',
         'price_changed': (
             'Price changed: <b>{title}</b>\n'
             '{old_price} → {new_price} {currency} ({change}%)\n'

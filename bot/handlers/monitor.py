@@ -17,6 +17,7 @@ from bot.core.logging import get_logger
 from bot.core.services.tracking_service import TrackingService
 from bot.core.states import Flow
 from bot.handlers.context import tracked_labels, user_locale
+from bot.handlers.replies import edit_or_send, sender_id
 from bot.handlers.tracking import render_list
 from bot.keyboards import (
     CB_THRESHOLD_MENU,
@@ -31,21 +32,24 @@ logger = get_logger(__name__)
 
 router = Router()
 
+_NOT_A_COMMAND = ~F.text.startswith('/')
+
 
 @router.message(Command('monitor'))
 async def cmd_monitor(message: Message, command: CommandObject, state: FSMContext):
     """One-line form, or the first step of the interactive one."""
+    await state.clear()
+    locale = await user_locale(sender_id(message))
     args = (command.args or '').split()
 
     if args:
         if len(args) != 3 or args[0].lower() != 'set':
-            await message.answer('/monitor set <id> <delta>')
+            await message.answer(get_text(locale, 'monitor_usage'))
             return
         await _apply_threshold(message, args[1], args[2])
         return
 
-    locale = await user_locale(message.from_user.id)
-    labels = await tracked_labels(message.from_user.id)
+    labels = await tracked_labels(sender_id(message))
     if not labels:
         await message.answer(get_text(locale, 'no_tracked_products'))
         return
@@ -57,11 +61,11 @@ async def cmd_monitor(message: Message, command: CommandObject, state: FSMContex
     )
 
 
-@router.message(Flow.threshold_product)
+@router.message(Flow.threshold_product, F.text, _NOT_A_COMMAND)
 async def threshold_product_received(message: Message, state: FSMContext):
     """A product id typed instead of tapping one of the offered products."""
     product_id = validate_product_id((message.text or '').strip())
-    locale = await user_locale(message.from_user.id)
+    locale = await user_locale(sender_id(message))
 
     if not product_id:
         await message.answer(get_text(locale, 'invalid_product_id'))
@@ -78,23 +82,24 @@ async def threshold_product_received(message: Message, state: FSMContext):
 @router.callback_query(StateFilter('*'), F.data.startswith(f'{CB_THRESHOLD_MENU}:'))
 async def cb_threshold_menu(callback: CallbackQuery, state: FSMContext):
     """A product was picked: offer the percentages."""
-    product_id = validate_product_id(callback.data.split(':')[1])
+    product_id = validate_product_id((callback.data or '').split(':')[1])
     if not product_id:
         await callback.answer()
         return
 
-    locale = await user_locale(callback.from_user.id)
+    locale = await user_locale(sender_id(callback))
     await state.set_state(Flow.threshold_value)
     await state.update_data(product_id=product_id)
 
-    await callback.message.edit_text(
+    await edit_or_send(
+        callback,
         get_text(locale, 'prompt_threshold_value', product_id=product_id),
         reply_markup=threshold_choices(locale, product_id),
     )
     await callback.answer()
 
 
-@router.message(Flow.threshold_value)
+@router.message(Flow.threshold_value, F.text, _NOT_A_COMMAND)
 async def threshold_value_received(message: Message, state: FSMContext):
     """A percentage typed instead of tapping one of the offered ones."""
     data = await state.get_data()
@@ -111,15 +116,22 @@ async def threshold_value_received(message: Message, state: FSMContext):
 async def cb_threshold_set(callback: CallbackQuery, state: FSMContext):
     """A percentage was picked from the keyboard."""
     await state.clear()
-    _, raw_product_id, raw_delta = callback.data.split(':')
+    # A crafted callback payload need not have three parts; refuse it quietly
+    # rather than crashing on the unpack.
+    parts = (callback.data or '').split(':')
+    if len(parts) != 3:
+        await callback.answer()
+        return
+    _, raw_product_id, raw_delta = parts
     product_id = validate_product_id(raw_product_id)
     delta = validate_threshold(raw_delta)
     if not product_id or not delta:
         await callback.answer()
         return
 
-    async with base.async_session_maker() as session:
-        user = await TrackingService.get_or_create_user(session, callback.from_user.id)
+    tg_user_id = sender_id(callback)
+    async with base.new_session() as session:
+        user = await TrackingService.get_or_create_user(session, tg_user_id)
         tracking = await TrackingService.update_tracking_threshold(session, user, product_id, delta)
         await session.commit()
         locale = user.locale
@@ -128,21 +140,22 @@ async def cb_threshold_set(callback: CallbackQuery, state: FSMContext):
         await callback.answer(get_text(locale, 'custom_threshold_set', product_id=product_id, delta=delta))
         logger.info(
             'Threshold set via button',
-            extra={'tg_user_id': callback.from_user.id, 'product_id': product_id, 'threshold': delta},
+            extra={'tg_user_id': tg_user_id, 'product_id': product_id, 'threshold': delta},
         )
     else:
         await callback.answer(get_text(locale, 'product_not_found'))
 
-    text, keyboard = await render_list(callback.from_user.id)
-    await callback.message.edit_text(text, parse_mode='HTML', disable_web_page_preview=True, reply_markup=keyboard)
+    text, keyboard = await render_list(tg_user_id)
+    await edit_or_send(callback, text, parse_mode='HTML', disable_web_page_preview=True, reply_markup=keyboard)
 
 
 async def _apply_threshold(message: Message, raw_product_id: str, raw_delta: str) -> None:
     product_id = validate_product_id(raw_product_id)
     threshold = validate_threshold(raw_delta)
+    tg_user_id = sender_id(message)
 
-    async with base.async_session_maker() as session:
-        user = await TrackingService.get_or_create_user(session, message.from_user.id)
+    async with base.new_session() as session:
+        user = await TrackingService.get_or_create_user(session, tg_user_id)
 
         if not product_id or not threshold:
             # Name the argument that was actually wrong: complaining about the
@@ -159,7 +172,7 @@ async def _apply_threshold(message: Message, raw_product_id: str, raw_delta: str
             text = get_text(user.locale, 'custom_threshold_set', product_id=product_id, delta=threshold)
             logger.info(
                 'Threshold set',
-                extra={'tg_user_id': message.from_user.id, 'product_id': product_id, 'threshold': threshold},
+                extra={'tg_user_id': tg_user_id, 'product_id': product_id, 'threshold': threshold},
             )
         else:
             text = get_text(user.locale, 'product_not_found')
